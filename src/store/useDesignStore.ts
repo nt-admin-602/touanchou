@@ -1,8 +1,11 @@
 import { create } from 'zustand'
-import type { GlassItem, ShapeType, Viewport, Screen } from '../types'
+import type { GlassItem, ShapeType, Viewport, Screen, DesignDocument, DraftBackup } from '../types'
 import { DEFAULT_COLOR_ID } from '../config/colors'
+import { DEFAULT_GROUT_GAP_MM } from '../config/canvas'
 import { calcInitialViewport, snapMm, snapDeg } from '../utils/coordinates'
 import { findOverlappingIds } from '../utils/geometry'
+import { saveDesign as saveDesignDB, getDesign, loadDraft, saveDraft, clearDraft } from '../utils/storage'
+import { generateThumbnail } from '../utils/thumbnail'
 
 const MAX_UNDO = 50
 
@@ -36,8 +39,15 @@ type DesignState = {
   undoStack: GlassItem[][]
   redoStack: GlassItem[][]
 
+  // 図案メタ
+  designId: string | null     // null = 未保存
+  designName: string
+  isDirty: boolean            // 未保存の変更あり
+
   // ナビゲーション
   goToEditor: (widthMm: number, heightMm: number) => void
+  goToList: () => void
+  goToNew: () => void
   setViewport: (vp: Viewport) => void
   initViewport: (screenW: number, screenH: number) => void
 
@@ -72,6 +82,16 @@ type DesignState = {
   // パレット
   setPendingShape: (shape: ShapeType) => void
   setPendingColor: (colorId: string) => void
+
+  // 保存・管理（Phase 3）
+  setDesignName: (name: string) => void
+  saveCurrentDesign: () => Promise<void>
+  openDesign: (doc: DesignDocument) => void
+  checkDraft: () => Promise<DraftBackup | null>
+  restoreDraft: (backup: DraftBackup) => void
+  discardDraft: () => Promise<void>
+  exportJSON: () => void
+  importJSON: (jsonStr: string) => Promise<{ ok: boolean; error?: string }>
 }
 
 export const useDesignStore = create<DesignState>((set, get) => ({
@@ -87,6 +107,9 @@ export const useDesignStore = create<DesignState>((set, get) => ({
   viewport: { zoom: 3, panX: 0, panY: 0 },
   undoStack: [],
   redoStack: [],
+  designId: null,
+  designName: '',
+  isDirty: false,
 
   goToEditor: (widthMm, heightMm) => {
     set({
@@ -99,8 +122,15 @@ export const useDesignStore = create<DesignState>((set, get) => ({
       overlappingIds: [],
       undoStack: [],
       redoStack: [],
+      designId: null,
+      designName: '',
+      isDirty: false,
     })
   },
+
+  goToList: () => set({ screen: 'list', selectedIds: [], multiSelectMode: false }),
+
+  goToNew: () => set({ screen: 'new' }),
 
   setViewport: (vp) => set({ viewport: vp }),
 
@@ -284,5 +314,182 @@ export const useDesignStore = create<DesignState>((set, get) => ({
 
   setPendingShape: (shape) => set({ pendingShape: shape }),
   setPendingColor: (colorId) => set({ pendingColorId: colorId }),
+
+  // ── Phase 3: 保存・管理 ──────────────────────────────────
+
+  setDesignName: (name) => set({ designName: name }),
+
+  saveCurrentDesign: async () => {
+    const state = get()
+    const now = new Date().toISOString()
+    const id = state.designId ?? `d-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    const name = state.designName || generateDesignName()
+    const doc: DesignDocument = {
+      id,
+      name,
+      createdAt: state.designId ? (await getDesign(id))?.createdAt ?? now : now,
+      updatedAt: now,
+      canvasWidthMm: state.canvasWidthMm,
+      canvasHeightMm: state.canvasHeightMm,
+      groutGapMm: DEFAULT_GROUT_GAP_MM,
+      items: state.items,
+      dataVersion: 1,
+    }
+    const thumbnail = await generateThumbnail(state.items, state.canvasWidthMm, state.canvasHeightMm)
+    await saveDesignDB({ ...doc, thumbnail })
+    await clearDraft()
+    set({
+      designId: id,
+      designName: name,
+      isDirty: false,
+      undoStack: [],
+      redoStack: [],
+    })
+  },
+
+  openDesign: (doc) => {
+    set({
+      screen: 'editor',
+      canvasWidthMm: doc.canvasWidthMm,
+      canvasHeightMm: doc.canvasHeightMm,
+      items: doc.items,
+      selectedIds: [],
+      multiSelectMode: false,
+      overlappingIds: [],
+      undoStack: [],
+      redoStack: [],
+      designId: doc.id,
+      designName: doc.name,
+      isDirty: false,
+    })
+  },
+
+  checkDraft: async () => {
+    const backup = await loadDraft()
+    return backup ?? null
+  },
+
+  restoreDraft: (backup) => {
+    const doc = backup.document
+    set({
+      screen: 'editor',
+      canvasWidthMm: doc.canvasWidthMm,
+      canvasHeightMm: doc.canvasHeightMm,
+      items: doc.items,
+      selectedIds: [],
+      multiSelectMode: false,
+      overlappingIds: [],
+      undoStack: backup.undoStack,
+      redoStack: backup.redoStack,
+      designId: doc.id.startsWith('unsaved-') ? null : doc.id,
+      designName: doc.name,
+      isDirty: true,
+    })
+  },
+
+  discardDraft: async () => {
+    await clearDraft()
+  },
+
+  exportJSON: () => {
+    const state = get()
+    const doc: DesignDocument = {
+      id: state.designId ?? `design-${Date.now()}`,
+      name: state.designName || '図案',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      canvasWidthMm: state.canvasWidthMm,
+      canvasHeightMm: state.canvasHeightMm,
+      groutGapMm: DEFAULT_GROUT_GAP_MM,
+      items: state.items,
+      dataVersion: 1,
+    }
+    const json = JSON.stringify(doc, null, 2)
+    const blob = new Blob([json], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${doc.name}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  },
+
+  importJSON: async (jsonStr) => {
+    try {
+      const raw = JSON.parse(jsonStr)
+      if (!raw || typeof raw !== 'object' || !Array.isArray(raw.items)) {
+        return { ok: false, error: 'JSONの形式が正しくありません' }
+      }
+      const now = new Date().toISOString()
+      const doc: DesignDocument = {
+        id: `d-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        name: String(raw.name ?? '読み込み図案'),
+        createdAt: now,
+        updatedAt: now,
+        canvasWidthMm: Number(raw.canvasWidthMm) || 100,
+        canvasHeightMm: Number(raw.canvasHeightMm) || 100,
+        groutGapMm: Number(raw.groutGapMm) || DEFAULT_GROUT_GAP_MM,
+        items: raw.items,
+        dataVersion: Number(raw.dataVersion) || 1,
+      }
+      const thumbnail = await generateThumbnail(doc.items, doc.canvasWidthMm, doc.canvasHeightMm)
+      await saveDesignDB({ ...doc, thumbnail })
+      return { ok: true }
+    } catch {
+      return { ok: false, error: 'JSONの解析に失敗しました' }
+    }
+  },
 }))
+
+// ── 図案名の自動生成 ──────────────────────────────────────────
+function generateDesignName(): string {
+  const now = new Date()
+  const y = now.getFullYear()
+  const mo = String(now.getMonth() + 1).padStart(2, '0')
+  const d = String(now.getDate()).padStart(2, '0')
+  const h = String(now.getHours()).padStart(2, '0')
+  const mi = String(now.getMinutes()).padStart(2, '0')
+  return `新しい図案 ${y}-${mo}-${d} ${h}:${mi}`
+}
+
+// ── 自動バックアップ（最後の変更から 1.5 秒後に保存）────────
+let _backupTimer: ReturnType<typeof setTimeout> | null = null
+
+useDesignStore.subscribe((state, prevState) => {
+  if (state.screen !== 'editor') return
+  const changed =
+    state.items !== prevState.items ||
+    state.undoStack !== prevState.undoStack ||
+    state.redoStack !== prevState.redoStack
+  if (!changed) return
+
+  // isDirty を立てる
+  if (!state.isDirty) {
+    useDesignStore.setState({ isDirty: true })
+  }
+
+  if (_backupTimer) clearTimeout(_backupTimer)
+  _backupTimer = setTimeout(async () => {
+    const s = useDesignStore.getState()
+    if (s.screen !== 'editor') return
+    const now = new Date().toISOString()
+    const backup: import('../types').DraftBackup = {
+      document: {
+        id: s.designId ?? `unsaved-${Date.now()}`,
+        name: s.designName,
+        createdAt: now,
+        updatedAt: now,
+        canvasWidthMm: s.canvasWidthMm,
+        canvasHeightMm: s.canvasHeightMm,
+        groutGapMm: DEFAULT_GROUT_GAP_MM,
+        items: s.items,
+        dataVersion: 1,
+      },
+      undoStack: s.undoStack,
+      redoStack: s.redoStack,
+      updatedAt: now,
+    }
+    await saveDraft(backup)
+  }, 1500)
+})
 

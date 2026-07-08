@@ -21,6 +21,23 @@ export type DesignDocument = {
   dataVersion: number
 }
 
+export type DesignMeta = {
+  id: string
+  name: string
+  thumbnail: string        // base64 PNG or ''
+  canvasWidthMm: number
+  canvasHeightMm: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type DraftBackup = {
+  document: DesignDocument
+  undoStack: GlassItem[][]
+  redoStack: GlassItem[][]
+  updatedAt: string
+}
+
 export type Viewport = {
   zoom: number  // px per mm
   panX: number  // screen px
@@ -35,4 +52,4 @@ export type GlassColor = {
   isMirror?: boolean
 }
 
-export type Screen = 'new' | 'editor'
+export type Screen = 'new' | 'editor' | 'list'

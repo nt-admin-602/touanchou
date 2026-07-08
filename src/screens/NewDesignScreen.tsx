@@ -1,12 +1,20 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useDesignStore } from '../store/useDesignStore'
 import { CANVAS_TEMPLATES, CANVAS_LIMITS } from '../config/canvas'
+import type { DraftBackup } from '../types'
 
 export function NewDesignScreen() {
-  const goToEditor = useDesignStore(s => s.goToEditor)
+  const { goToEditor, goToList, checkDraft, restoreDraft, discardDraft } = useDesignStore()
   const [customW, setCustomW] = useState('')
   const [customH, setCustomH] = useState('')
   const [error, setError] = useState('')
+  const [draftBackup, setDraftBackup] = useState<DraftBackup | null>(null)
+
+  useEffect(() => {
+    checkDraft().then(backup => {
+      if (backup) setDraftBackup(backup)
+    })
+  }, [checkDraft])
 
   function handleTemplate(widthMm: number, heightMm: number) {
     goToEditor(widthMm, heightMm)
@@ -37,6 +45,36 @@ export function NewDesignScreen() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center px-6 gap-8">
+
+      {/* ドラフト復元ダイアログ */}
+      {draftBackup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-6">
+          <div className="bg-gray-800 rounded-2xl p-6 w-full max-w-sm">
+            <h2 className="font-bold text-lg mb-2">前回の作業を復元しますか？</h2>
+            <p className="text-gray-400 text-sm mb-1">
+              「{draftBackup.document.name || '未保存の図案'}」
+            </p>
+            <p className="text-gray-500 text-xs mb-5">
+              {new Date(draftBackup.updatedAt).toLocaleString('ja-JP')}
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => restoreDraft(draftBackup)}
+                className="flex-1 py-3 bg-blue-600 rounded-xl font-bold active:bg-blue-700"
+              >
+                復元する
+              </button>
+              <button
+                onClick={async () => { await discardDraft(); setDraftBackup(null) }}
+                className="flex-1 py-3 bg-gray-700 rounded-xl active:bg-gray-600 text-gray-300"
+              >
+                破棄する
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="text-center">
         <h1 className="text-3xl font-bold tracking-widest mb-1">灯案帳</h1>
         <p className="text-gray-400 text-sm">トルコランプ図案作成</p>
@@ -96,6 +134,14 @@ export function NewDesignScreen() {
             作成
           </button>
         </div>
+
+        {/* 保存済み図案を開く */}
+        <button
+          onClick={goToList}
+          className="w-full py-4 bg-transparent border border-gray-600 rounded-2xl text-gray-300 active:bg-gray-800 transition-colors text-sm font-medium"
+        >
+          保存済み図案を開く
+        </button>
       </div>
     </div>
   )
