@@ -1,24 +1,30 @@
-import { useRef, useEffect, useCallback } from 'react'
+import { useRef, useEffect, useCallback, useMemo } from 'react'
 import { useDesignStore } from '../../store/useDesignStore'
 import { CanvasGrid } from './CanvasGrid'
 import { GlassPiece } from './GlassPiece'
 import { SelectionOverlay } from './SelectionOverlay'
 import { screenToMm } from '../../utils/coordinates'
 import { applyPinchZoom } from '../../utils/coordinates'
-import { getShapeVertices, rotateVertices, pointInPolygon } from '../../utils/geometry'
+import {
+  getShapeVertices, rotateVertices, pointInPolygon, getShapeBounds,
+} from '../../utils/geometry'
+import type { GlassItem } from '../../types'
 
 const DRAG_THRESHOLD_PX = 6
 
 type PointerInfo = { x: number; y: number; startX: number; startY: number }
+type DragMode = 'idle' | 'drag-glass' | 'drag-group' | 'rotate-glass' | 'rotate-group' | 'viewport'
 
 export function CanvasRoot() {
   const containerRef = useRef<HTMLDivElement>(null)
 
   const {
     canvasWidthMm, canvasHeightMm,
-    items, selectedId,
+    items, selectedIds, multiSelectMode, overlappingIds,
     viewport, setViewport, initViewport,
-    placeGlass, selectGlass, moveGlass, rotateGlass,
+    placeGlass, selectGlass, toggleSelectGlass, clearSelection,
+    moveGlass, batchMoveGlasses, rotateGlass, batchRotateGlasses,
+    pushUndo, revertItems,
   } = useDesignStore()
 
   // 初期ビューポート
@@ -33,12 +39,23 @@ export function CanvasRoot() {
   const pointers = useRef<Map<number, PointerInfo>>(new Map())
   // ドラッグ状態
   const dragState = useRef<{
-    mode: 'idle' | 'drag-glass' | 'rotate-glass' | 'viewport'
+    mode: DragMode
+    // 単体移動
     glassId: string
     startGlassX: number
     startGlassY: number
+    // 単体回転
     startAngleDeg: number
     startRotationDeg: number
+    // グループ移動
+    startPositions: Map<string, { xMm: number; yMm: number }>
+    // グループ回転
+    rotationCenterX: number
+    rotationCenterY: number
+    startRotations: Map<string, number>
+    // revert 用スナップショット
+    preDragItems: GlassItem[]
+    // ピンチ状態
     prevPinchDist: number
     prevPinchMidX: number
     prevPinchMidY: number
@@ -46,22 +63,29 @@ export function CanvasRoot() {
   }>({
     mode: 'idle', glassId: '', startGlassX: 0, startGlassY: 0,
     startAngleDeg: 0, startRotationDeg: 0,
+    startPositions: new Map(),
+    rotationCenterX: 0, rotationCenterY: 0, startRotations: new Map(),
+    preDragItems: [],
     prevPinchDist: 0, prevPinchMidX: 0, prevPinchMidY: 0,
     isDragging: false,
   })
 
-  /** スクリーン座標でヒットテスト */
+  /** スクリーン座標でヒットテスト（選択中を最前面で判定） */
   const hitTest = useCallback((sx: number, sy: number): string | null => {
     const mm = screenToMm(sx, sy, viewport)
-    // 上に積まれているものから探す（後のものが上）
-    for (let i = items.length - 1; i >= 0; i--) {
-      const item = items[i]
+    const selectedSet = new Set(selectedIds)
+    const ordered = [
+      ...items.filter(i => !selectedSet.has(i.id)),
+      ...items.filter(i => selectedSet.has(i.id)),
+    ]
+    for (let i = ordered.length - 1; i >= 0; i--) {
+      const item = ordered[i]
       const local = { x: mm.x - item.xMm, y: mm.y - item.yMm }
       const verts = rotateVertices(getShapeVertices(item.shape), item.rotationDeg)
       if (pointInPolygon(local.x, local.y, verts)) return item.id
     }
     return null
-  }, [items, viewport])
+  }, [items, viewport, selectedIds])
 
   const onPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId)
@@ -127,16 +151,30 @@ export function CanvasRoot() {
     if (!ds.isDragging) {
       if (Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) {
         ds.isDragging = true
-        // ドラッグ対象を決定
-        const hitId = hitTest(info.startX, info.startY)
-        if (hitId) {
-          if (ds.mode !== 'rotate-glass') {
-            const item = items.find(i => i.id === hitId)!
-            ds.mode = 'drag-glass'
-            ds.glassId = hitId
-            ds.startGlassX = item.xMm
-            ds.startGlassY = item.yMm
-            selectGlass(hitId)
+        const isRotating = ds.mode === 'rotate-glass' || ds.mode === 'rotate-group'
+        if (!isRotating) {
+          const hitId = hitTest(info.startX, info.startY)
+          if (hitId) {
+            ds.preDragItems = [...items]
+            if (selectedIds.includes(hitId) && selectedIds.length > 1) {
+              // グループドラッグ
+              ds.mode = 'drag-group'
+              ds.startPositions = new Map(
+                items
+                  .filter(item => selectedIds.includes(item.id))
+                  .map(item => [item.id, { xMm: item.xMm, yMm: item.yMm }])
+              )
+            } else {
+              // 単体ドラッグ
+              const item = items.find(i => i.id === hitId)!
+              ds.mode = 'drag-glass'
+              ds.glassId = hitId
+              ds.startGlassX = item.xMm
+              ds.startGlassY = item.yMm
+              if (!selectedIds.includes(hitId)) {
+                selectGlass(hitId)
+              }
+            }
           }
         }
       }
@@ -149,6 +187,18 @@ export function CanvasRoot() {
         const newX = ds.startGlassX + (currMm.x - startMm.x)
         const newY = ds.startGlassY + (currMm.y - startMm.y)
         moveGlass(ds.glassId, newX, newY)
+      }
+      if (ds.mode === 'drag-group') {
+        const startMm = screenToMm(info.startX, info.startY, viewport)
+        const currMm = screenToMm(e.clientX, e.clientY, viewport)
+        const dxMm = currMm.x - startMm.x
+        const dyMm = currMm.y - startMm.y
+        const updates = [...ds.startPositions.entries()].map(([id, pos]) => ({
+          id,
+          xMm: pos.xMm + dxMm,
+          yMm: pos.yMm + dyMm,
+        }))
+        batchMoveGlasses(updates)
       }
       if (ds.mode === 'rotate-glass' && ds.glassId) {
         const item = items.find(i => i.id === ds.glassId)
@@ -164,8 +214,24 @@ export function CanvasRoot() {
         const newRot = ds.startRotationDeg + (angle - ds.startAngleDeg)
         rotateGlass(ds.glassId, newRot)
       }
+      if (ds.mode === 'rotate-group') {
+        const centerScreen = {
+          x: ds.rotationCenterX * viewport.zoom + viewport.panX,
+          y: ds.rotationCenterY * viewport.zoom + viewport.panY,
+        }
+        const angle = Math.atan2(
+          e.clientY - centerScreen.y,
+          e.clientX - centerScreen.x,
+        ) * (180 / Math.PI)
+        const delta = angle - ds.startAngleDeg
+        const updates = [...ds.startRotations.entries()].map(([id, startRot]) => ({
+          id,
+          rotationDeg: startRot + delta,
+        }))
+        batchRotateGlasses(updates)
+      }
     }
-  }, [viewport, setViewport, hitTest, items, selectGlass, moveGlass, rotateGlass])
+  }, [viewport, setViewport, hitTest, items, selectedIds, selectGlass, moveGlass, batchMoveGlasses, rotateGlass, batchRotateGlasses])
 
   const onPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     const info = pointers.current.get(e.pointerId)
@@ -173,18 +239,33 @@ export function CanvasRoot() {
 
     const ds = dragState.current
 
-    if (!ds.isDragging && info) {
+    if (ds.isDragging) {
+      const isDragOrRotate =
+        ds.mode === 'drag-glass' || ds.mode === 'drag-group' ||
+        ds.mode === 'rotate-glass' || ds.mode === 'rotate-group'
+      if (isDragOrRotate) {
+        // 最新の重なり状態を確認して確定 or 元に戻す
+        const { overlappingIds: currentOverlaps } = useDesignStore.getState()
+        if (currentOverlaps.length > 0) {
+          revertItems(ds.preDragItems)
+        } else {
+          pushUndo(ds.preDragItems)
+        }
+      }
+    } else if (info) {
       // タップ判定
       const hitId = hitTest(info.startX, info.startY)
       if (hitId) {
-        // 既に選択中なら選択解除、そうでなければ選択（spec §11.2）
-        selectGlass(hitId === selectedId ? null : hitId)
-      } else {
-        if (selectedId) {
-          // 空白タップ → 選択解除
-          selectGlass(null)
+        if (multiSelectMode) {
+          toggleSelectGlass(hitId)
         } else {
-          // ガラス配置
+          const isSoleSelected = selectedIds.length === 1 && selectedIds[0] === hitId
+          selectGlass(isSoleSelected ? null : hitId)
+        }
+      } else {
+        if (selectedIds.length > 0) {
+          clearSelection()
+        } else {
           const mm = screenToMm(info.startX, info.startY, viewport)
           placeGlass(mm.x, mm.y)
         }
@@ -204,7 +285,7 @@ export function CanvasRoot() {
       ds.prevPinchMidX = (pts[0].x + pts[1].x) / 2
       ds.prevPinchMidY = (pts[0].y + pts[1].y) / 2
     }
-  }, [hitTest, selectedId, selectGlass, viewport, placeGlass])
+  }, [hitTest, selectedIds, multiSelectMode, selectGlass, toggleSelectGlass, clearSelection, viewport, placeGlass, revertItems, pushUndo])
 
   const onPointerCancel = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     pointers.current.delete(e.pointerId)
@@ -212,39 +293,91 @@ export function CanvasRoot() {
     dragState.current.isDragging = false
   }, [])
 
-  /** 回転ハンドルの pointerDown ハンドラー（CanvasRoot に委譲） */
-  const onRotateHandlePointerDown = useCallback((e: React.PointerEvent, itemId: string) => {
+  /** 回転ハンドルの pointerDown（centerXMm/centerYMm は回転中心・角度計算に使用） */
+  const onRotateHandlePointerDown = useCallback((
+    e: React.PointerEvent,
+    centerXMm: number,
+    centerYMm: number,
+  ) => {
     e.stopPropagation()
-    const item = items.find(i => i.id === itemId)
-    if (!item) return
-
     const centerScreen = {
-      x: item.xMm * viewport.zoom + viewport.panX,
-      y: item.yMm * viewport.zoom + viewport.panY,
+      x: centerXMm * viewport.zoom + viewport.panX,
+      y: centerYMm * viewport.zoom + viewport.panY,
     }
     const startAngle = Math.atan2(
       e.clientY - centerScreen.y,
       e.clientX - centerScreen.x,
     ) * (180 / Math.PI)
 
-    dragState.current.mode = 'rotate-glass'
-    dragState.current.glassId = itemId
+    dragState.current.preDragItems = [...items]
     dragState.current.startAngleDeg = startAngle
-    dragState.current.startRotationDeg = item.rotationDeg
     dragState.current.isDragging = true
 
-    // ポインターをコンテナにキャプチャ
+    if (selectedIds.length === 1) {
+      const item = items.find(i => i.id === selectedIds[0])
+      if (!item) return
+      dragState.current.mode = 'rotate-glass'
+      dragState.current.glassId = selectedIds[0]
+      dragState.current.startRotationDeg = item.rotationDeg
+    } else {
+      dragState.current.mode = 'rotate-group'
+      dragState.current.rotationCenterX = centerXMm
+      dragState.current.rotationCenterY = centerYMm
+      dragState.current.startRotations = new Map(
+        selectedIds.map(id => {
+          const item = items.find(i => i.id === id)
+          return [id, item?.rotationDeg ?? 0]
+        })
+      )
+    }
+
     containerRef.current?.setPointerCapture(e.pointerId)
     pointers.current.set(e.pointerId, {
       x: e.clientX, y: e.clientY,
       startX: e.clientX, startY: e.clientY,
     })
-  }, [items, viewport])
+  }, [items, viewport, selectedIds])
 
   // 選択ガラスを最前面に並び替えて描画
-  const sortedItems = selectedId
-    ? [...items.filter(i => i.id !== selectedId), ...items.filter(i => i.id === selectedId)]
-    : items
+  const overlappingSet = useMemo(() => new Set(overlappingIds), [overlappingIds])
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds])
+  const sortedItems = useMemo(() => [
+    ...items.filter(i => !selectedSet.has(i.id)),
+    ...items.filter(i => selectedSet.has(i.id)),
+  ], [items, selectedSet])
+
+  // SelectionOverlay 用パラメータ
+  const selectionOverlayProps = useMemo(() => {
+    if (selectedIds.length === 0) return null
+    if (selectedIds.length === 1) {
+      const item = items.find(i => i.id === selectedIds[0])
+      if (!item) return null
+      const bounds = getShapeBounds(item.shape, item.rotationDeg)
+      return {
+        centerXMm: item.xMm,
+        topYMm: item.yMm + bounds.minY,
+        rotCenterX: item.xMm,
+        rotCenterY: item.yMm,
+      }
+    }
+    // 複数選択: グループバウンディングボックス
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    for (const id of selectedIds) {
+      const item = items.find(i => i.id === id)
+      if (!item) continue
+      const verts = rotateVertices(getShapeVertices(item.shape), item.rotationDeg)
+      for (const v of verts) {
+        const wx = v.x + item.xMm, wy = v.y + item.yMm
+        if (wx < minX) minX = wx
+        if (wx > maxX) maxX = wx
+        if (wy < minY) minY = wy
+        if (wy > maxY) maxY = wy
+      }
+    }
+    const cx = (minX + maxX) / 2
+    const cy = (minY + maxY) / 2
+    return { centerXMm: cx, topYMm: minY, rotCenterX: cx, rotCenterY: cy }
+  }, [selectedIds, items])
 
   const { zoom, panX, panY } = viewport
 
@@ -277,20 +410,24 @@ export function CanvasRoot() {
             <GlassPiece
               key={item.id}
               item={item}
-              isSelected={item.id === selectedId}
+              isSelected={selectedSet.has(item.id)}
+              isOverlapping={overlappingSet.has(item.id)}
             />
           ))}
 
-          {selectedId && (() => {
-            const item = items.find(i => i.id === selectedId)
-            if (!item) return null
-            return (
-              <SelectionOverlay
-                item={item}
-                onRotateHandlePointerDown={(e) => onRotateHandlePointerDown(e, selectedId)}
-              />
-            )
-          })()}
+          {selectionOverlayProps && (
+            <SelectionOverlay
+              centerXMm={selectionOverlayProps.centerXMm}
+              topYMm={selectionOverlayProps.topYMm}
+              onRotateHandlePointerDown={(e) =>
+                onRotateHandlePointerDown(
+                  e,
+                  selectionOverlayProps.rotCenterX,
+                  selectionOverlayProps.rotCenterY,
+                )
+              }
+            />
+          )}
         </svg>
       </div>
     </div>

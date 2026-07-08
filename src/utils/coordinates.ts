@@ -29,7 +29,13 @@ export function snapMm(mm: number): number {
   return Math.round(mm)
 }
 
-/** キャンバスをスクリーンに収める初期 viewport を計算する */
+/** 回転スナップ（5度単位） */
+const ROTATION_SNAP_DEG = 5
+export function snapDeg(deg: number): number {
+  return Math.round(deg / ROTATION_SNAP_DEG) * ROTATION_SNAP_DEG
+}
+
+/** キャンバスを縦幅に合わせて拡大した初期 viewport を計算する */
 export function calcInitialViewport(
   canvasWidthMm: number,
   canvasHeightMm: number,
@@ -38,9 +44,9 @@ export function calcInitialViewport(
   paddingPx = 16,
   paletteHeightPx = 120,
 ): Viewport {
-  const availW = screenW - paddingPx * 2
   const availH = screenH - paletteHeightPx - paddingPx * 2 - 48 // toolbar
-  const zoom = Math.min(availW / canvasWidthMm, availH / canvasHeightMm)
+  // 縦幅合わせ：キャンバス高さを利用可能高さにフィット
+  const zoom = availH / canvasHeightMm
   const panX = (screenW - canvasWidthMm * zoom) / 2
   const panY = 48 + paddingPx
   return { zoom, panX, panY }

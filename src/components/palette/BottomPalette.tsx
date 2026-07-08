@@ -6,7 +6,33 @@ import type { ShapeType } from '../../types'
 const SHAPES: ShapeType[] = ['diamond', 'triangle', 'square']
 
 export function BottomPalette() {
-  const { pendingShape, pendingColorId, setPendingShape, setPendingColor } = useDesignStore()
+  const {
+    selectedIds, items,
+    pendingShape, pendingColorId,
+    setPendingShape, setPendingColor,
+    changeSelectedColor, changeSelectedShape,
+  } = useDesignStore()
+
+  const hasSelection = selectedIds.length > 0
+  const firstSelected = hasSelection ? items.find(i => i.id === selectedIds[0]) : undefined
+  // パレットのハイライトは選択中ガラスに合わせる
+  const activeColorId = firstSelected?.colorId ?? pendingColorId
+  const activeShape = firstSelected?.shape ?? pendingShape
+
+  const handleColorTap = (colorId: string) => {
+    if (hasSelection) {
+      changeSelectedColor(colorId)
+    }
+    setPendingColor(colorId)  // 常に保持
+  }
+
+  const handleShapeTap = (shape: ShapeType) => {
+    if (hasSelection) {
+      changeSelectedShape(shape)
+    } else {
+      setPendingShape(shape)
+    }
+  }
 
   return (
     <div className="shrink-0 bg-gray-900 pb-safe">
@@ -15,15 +41,15 @@ export function BottomPalette() {
         {SHAPES.map(shape => (
           <button
             key={shape}
-            onClick={() => setPendingShape(shape)}
+            onClick={() => handleShapeTap(shape)}
             className={[
               'flex-1 py-2 rounded-lg text-sm font-medium border transition-colors',
-              pendingShape === shape
+              activeShape === shape
                 ? 'bg-blue-500 border-blue-400 text-white'
                 : 'bg-gray-700 border-gray-600 text-gray-200 active:bg-gray-600',
             ].join(' ')}
           >
-            <ShapeIcon shape={shape} selected={pendingShape === shape} />
+            <ShapeIcon shape={shape} selected={activeShape === shape} />
             <span className="block text-xs mt-0.5">{SHAPE_LABELS[shape]}</span>
           </button>
         ))}
@@ -34,11 +60,11 @@ export function BottomPalette() {
         {GLASS_COLORS.map(color => (
           <button
             key={color.id}
-            onClick={() => setPendingColor(color.id)}
+            onClick={() => handleColorTap(color.id)}
             title={color.label}
             className={[
               'shrink-0 w-9 h-9 rounded-full border-2 transition-transform active:scale-90',
-              pendingColorId === color.id
+              activeColorId === color.id
                 ? 'border-white scale-110 shadow-lg'
                 : 'border-gray-600',
             ].join(' ')}

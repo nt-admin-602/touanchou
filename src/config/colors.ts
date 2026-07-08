@@ -28,7 +28,7 @@ export const GLASS_COLORS: GlassColor[] = [
   { id: 'black',            label: 'ブラック',           fill: '#181818', opacity: 0.90 },
 ]
 
-export const DEFAULT_COLOR_ID = 'transparent'
+export const DEFAULT_COLOR_ID = 'red'
 
 export function getColor(id: string): GlassColor {
   return GLASS_COLORS.find(c => c.id === id) ?? GLASS_COLORS[0]

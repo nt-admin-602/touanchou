@@ -1,36 +1,28 @@
-import { useMemo } from 'react'
-import type { GlassItem } from '../../types'
-import { getShapeBounds } from '../../utils/geometry'
-
 const HANDLE_OFFSET_MM = 6    // ハンドルをバウンディングボックス上端から離す距離
 const HANDLE_RADIUS_MM = 3    // タップしやすいサイズ
 
 type Props = {
-  item: GlassItem
+  centerXMm: number  // ハンドルの X 中心（mm）
+  topYMm: number     // 選択範囲の上端 Y（mm）
   onRotateHandlePointerDown: (e: React.PointerEvent) => void
 }
 
-export function SelectionOverlay({ item, onRotateHandlePointerDown }: Props) {
-  const bounds = useMemo(
-    () => getShapeBounds(item.shape, item.rotationDeg),
-    [item.shape, item.rotationDeg]
-  )
-
-  const handleX = 0
-  const handleY = bounds.minY - HANDLE_OFFSET_MM
+export function SelectionOverlay({ centerXMm, topYMm, onRotateHandlePointerDown }: Props) {
+  const handleX = centerXMm
+  const handleY = topYMm - HANDLE_OFFSET_MM
 
   return (
-    <g transform={`translate(${item.xMm}, ${item.yMm})`} pointerEvents="none">
-      {/* ハンドルと中心を結ぶ線 */}
+    <g pointerEvents="none">
+      {/* ハンドルと上端を結ぶ線 */}
       <line
-        x1={0} y1={bounds.minY}
+        x1={centerXMm} y1={topYMm}
         x2={handleX} y2={handleY}
         stroke="#2563eb"
         strokeWidth={0.3}
         strokeDasharray="1,0.8"
         vectorEffect="non-scaling-stroke"
       />
-      {/* 回転ハンドル（pointerEvents を有効にする）*/}
+      {/* 回転ハンドル */}
       <circle
         cx={handleX}
         cy={handleY}
@@ -43,7 +35,6 @@ export function SelectionOverlay({ item, onRotateHandlePointerDown }: Props) {
         style={{ cursor: 'grab', pointerEvents: 'all' }}
         onPointerDown={onRotateHandlePointerDown}
       />
-      {/* 回転アイコン（↻ 近似） */}
       <text
         x={handleX}
         y={handleY + 0.6}
@@ -58,3 +49,4 @@ export function SelectionOverlay({ item, onRotateHandlePointerDown }: Props) {
     </g>
   )
 }
+

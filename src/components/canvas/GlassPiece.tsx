@@ -5,14 +5,14 @@ import { getShapeVertices, rotateVertices, verticesToPoints } from '../../utils/
 type Props = {
   item: GlassItem
   isSelected: boolean
+  isOverlapping?: boolean
 }
 
-export function GlassPiece({ item, isSelected }: Props) {
+export function GlassPiece({ item, isSelected, isOverlapping }: Props) {
   const color = getColor(item.colorId)
   const verts = rotateVertices(getShapeVertices(item.shape), item.rotationDeg)
   const points = verticesToPoints(verts)
 
-  // 鏡ガラスのグラデーション定義
   const isMirror = color.isMirror === true
 
   return (
@@ -34,11 +34,11 @@ export function GlassPiece({ item, isSelected }: Props) {
         points={points}
         fill={isMirror ? `url(#mirror-${item.id})` : color.fill}
         fillOpacity={isMirror ? 1 : color.opacity}
-        stroke={isSelected ? '#2563eb' : '#00000030'}
-        strokeWidth={isSelected ? 0.4 : 0.2}
+        stroke={isOverlapping ? '#ef4444' : isSelected ? '#2563eb' : '#00000030'}
+        strokeWidth={isOverlapping || isSelected ? 0.4 : 0.2}
         vectorEffect="non-scaling-stroke"
       />
-      {isSelected && (
+      {isSelected && !isOverlapping && (
         <polygon
           points={points}
           fill="none"
@@ -49,6 +49,17 @@ export function GlassPiece({ item, isSelected }: Props) {
           pointerEvents="none"
         />
       )}
+      {isOverlapping && (
+        <polygon
+          points={points}
+          fill="none"
+          stroke="#ef4444"
+          strokeWidth={1.5}
+          vectorEffect="non-scaling-stroke"
+          pointerEvents="none"
+        />
+      )}
     </g>
   )
 }
+
