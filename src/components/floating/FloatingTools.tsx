@@ -5,7 +5,10 @@ import { getShapeVertices, rotateVertices } from '../../utils/geometry'
 const TOOLBAR_H = 48
 const PALETTE_H = 120
 const TOOL_W = 44
-const TOOL_H = 44
+// 3列 × 44px + gap2 × 4px + padding2 × 4px = 148px
+const PANEL_W = 3 * TOOL_W + 2 * 4 + 2 * 4
+// 2行 × 44px + gap1 × 4px + padding2 × 4px = 100px
+const PANEL_H = 2 * TOOL_W + 1 * 4 + 2 * 4
 
 export function FloatingTools() {
   const {
@@ -18,7 +21,6 @@ export function FloatingTools() {
   useEffect(() => {
     if (selectedIds.length === 0) return
 
-    // 選択グループのスクリーン空間バウンディングボックスを計算
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
     for (const id of selectedIds) {
       const item = items.find(i => i.id === id)
@@ -36,58 +38,75 @@ export function FloatingTools() {
     const cx = (minX + maxX) / 2
     const topY = minY
 
-    // ボタン数に応じてパネル幅を計算
-    const btnCount = multiSelectMode ? 3 : 2  // multi-select: ⊞ + 🗑; normal: ⊞ + 🗑
-    const PANEL_W = btnCount * TOOL_W + 8
-    const PANEL_H = TOOL_H + 8
     const sw = window.innerWidth
     const sh = window.innerHeight
 
     let x = cx - PANEL_W / 2
-    let y = topY - 60
+    let y = topY - PANEL_H - 8
 
     x = Math.max(4, Math.min(sw - PANEL_W - 4, x))
     y = Math.max(TOOLBAR_H + 4, Math.min(sh - PALETTE_H - PANEL_H - 8, y))
 
     setPos({ x, y })
-  }, [selectedIds, items, viewport, multiSelectMode])
+  }, [selectedIds, items, viewport])
 
   if (selectedIds.length === 0) return null
 
   return (
     <div
       ref={panelRef}
-      className="absolute z-20 flex gap-1 bg-gray-800 rounded-xl px-1 py-1 shadow-xl"
-      style={{ left: pos.x, top: pos.y }}
+      className="absolute z-20 bg-gray-800 rounded-xl shadow-xl"
+      style={{
+        left: pos.x,
+        top: pos.y,
+        display: 'grid',
+        gridTemplateColumns: `repeat(3, ${TOOL_W}px)`,
+        gap: '4px',
+        padding: '4px',
+      }}
     >
-      {/* Phase 4 で有効化するボタン（仮表示） */}
-      <button disabled title="複製" className="w-11 h-11 flex items-center justify-center rounded-lg text-xl text-white opacity-40">⧉</button>
-      <button disabled title="鏡像配置" className="w-11 h-11 flex items-center justify-center rounded-lg text-xl text-white opacity-40">⇋</button>
-      <button disabled title="連続配置" className="w-11 h-11 flex items-center justify-center rounded-lg text-xl text-white opacity-40">⋯</button>
-      <button disabled title="放射対称" className="w-11 h-11 flex items-center justify-center rounded-lg text-xl text-white opacity-40">✳</button>
-
-      {/* 複数選択トグル */}
-      <button
-        title={multiSelectMode ? '複数選択モード解除' : '複数選択モード'}
+      {/* 有効なボタンを先頭に（画面端でも見える位置） */}
+      <ToolBtn
+        icon="⊞"
+        label={multiSelectMode ? '複数選択解除' : '複数選択'}
+        active={multiSelectMode}
         onClick={() => setMultiSelectMode(!multiSelectMode)}
-        className={[
-          'w-11 h-11 flex items-center justify-center rounded-lg text-xl',
-          multiSelectMode
-            ? 'bg-blue-500 text-white'
-            : 'text-white opacity-70 active:opacity-100',
-        ].join(' ')}
-      >
-        ⊞
-      </button>
+      />
+      <ToolBtn icon="🗑" label="削除" danger onClick={deleteSelected} />
 
-      {/* 削除 */}
-      <button
-        title="削除"
-        onClick={deleteSelected}
-        className="w-11 h-11 flex items-center justify-center rounded-lg text-xl text-red-400 active:text-red-300"
-      >
-        🗑
-      </button>
+      {/* Phase 4 で有効化 */}
+      <ToolBtn icon="⧉" label="複製" disabled />
+      <ToolBtn icon="⇋" label="鏡像配置" disabled />
+      <ToolBtn icon="⋯" label="連続配置" disabled />
+      <ToolBtn icon="✳" label="放射対称" disabled />
     </div>
+  )
+}
+
+function ToolBtn({
+  icon, label, onClick, disabled, active, danger,
+}: {
+  icon: string
+  label: string
+  onClick?: () => void
+  disabled?: boolean
+  active?: boolean
+  danger?: boolean
+}) {
+  return (
+    <button
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+      className={[
+        'w-11 h-11 flex items-center justify-center rounded-lg text-xl',
+        disabled ? 'text-white opacity-30' : '',
+        active ? 'bg-blue-500 text-white' : '',
+        danger && !disabled ? 'text-red-400 active:text-red-300' : '',
+        !disabled && !active && !danger ? 'text-white opacity-80 active:opacity-100 active:bg-gray-700' : '',
+      ].join(' ')}
+    >
+      {icon}
+    </button>
   )
 }

@@ -55,6 +55,8 @@ export function CanvasRoot() {
     startRotations: Map<string, number>
     // revert 用スナップショット
     preDragItems: GlassItem[]
+    // PointerDown 時のガラス先取り検出（ドラッグ閾値を下げる）
+    pendingGlassId: string | null
     // ピンチ状態
     prevPinchDist: number
     prevPinchMidX: number
@@ -68,6 +70,7 @@ export function CanvasRoot() {
     preDragItems: [],
     prevPinchDist: 0, prevPinchMidX: 0, prevPinchMidY: 0,
     isDragging: false,
+    pendingGlassId: null as string | null,
   })
 
   /** スクリーン座標でヒットテスト（選択中を最前面で判定） */
@@ -99,11 +102,14 @@ export function CanvasRoot() {
     if (count === 1) {
       dragState.current.isDragging = false
       dragState.current.mode = 'idle'
+      // PointerDown 時点でガラスを先取り検出 → ドラッグ閾値を下げる
+      dragState.current.pendingGlassId = hitTest(e.clientX, e.clientY)
     }
     if (count === 2) {
       // 2本指 → ビューポート操作へ移行
       dragState.current.mode = 'viewport'
       dragState.current.isDragging = false
+      dragState.current.pendingGlassId = null
       const pts = [...pointers.current.values()]
       const dx = pts[1].x - pts[0].x
       const dy = pts[1].y - pts[0].y
@@ -111,7 +117,7 @@ export function CanvasRoot() {
       dragState.current.prevPinchMidX = (pts[0].x + pts[1].x) / 2
       dragState.current.prevPinchMidY = (pts[0].y + pts[1].y) / 2
     }
-  }, [])
+  }, [hitTest])
 
   const onPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     const info = pointers.current.get(e.pointerId)
@@ -149,11 +155,13 @@ export function CanvasRoot() {
     const dy = e.clientY - info.startY
 
     if (!ds.isDragging) {
-      if (Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) {
+      // ガラスを先取り検出済みなら閾値を下げる（2px）
+      const threshold = ds.pendingGlassId ? 2 : DRAG_THRESHOLD_PX
+      if (Math.hypot(dx, dy) > threshold) {
         ds.isDragging = true
         const isRotating = ds.mode === 'rotate-glass' || ds.mode === 'rotate-group'
         if (!isRotating) {
-          const hitId = hitTest(info.startX, info.startY)
+          const hitId = ds.pendingGlassId ?? hitTest(info.startX, info.startY)
           if (hitId) {
             ds.preDragItems = [...items]
             if (selectedIds.includes(hitId) && selectedIds.length > 1) {
