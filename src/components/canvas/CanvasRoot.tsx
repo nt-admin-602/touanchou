@@ -3,6 +3,7 @@ import { useDesignStore } from '../../store/useDesignStore'
 import { CanvasGrid } from './CanvasGrid'
 import { GlassPiece } from './GlassPiece'
 import { SelectionOverlay } from './SelectionOverlay'
+import { PlacementOverlay } from './PlacementOverlay'
 import { screenToMm } from '../../utils/coordinates'
 import { applyPinchZoom } from '../../utils/coordinates'
 import {
@@ -21,10 +22,12 @@ export function CanvasRoot() {
   const {
     canvasWidthMm, canvasHeightMm,
     items, selectedIds, multiSelectMode, overlappingIds,
+    previewItems, previewOverlapIds, activeTool,
     viewport, setViewport, initViewport,
     placeGlass, selectGlass, toggleSelectGlass, clearSelection,
     moveGlass, batchMoveGlasses, rotateGlass, batchRotateGlasses,
     pushUndo, revertItems,
+    moveDuplicateOffset, duplicateOffsetMm,
   } = useDesignStore()
 
   // 初期ビューポート
@@ -57,6 +60,9 @@ export function CanvasRoot() {
     preDragItems: GlassItem[]
     // PointerDown 時のガラス先取り検出（ドラッグ閾値を下げる）
     pendingGlassId: string | null
+    // 複製ドラッグ
+    dupStartOffsetX: number
+    dupStartOffsetY: number
     // ピンチ状態
     prevPinchDist: number
     prevPinchMidX: number
@@ -71,6 +77,9 @@ export function CanvasRoot() {
     prevPinchDist: 0, prevPinchMidX: 0, prevPinchMidY: 0,
     isDragging: false,
     pendingGlassId: null as string | null,
+    // 複製ドラッグ用
+    dupStartOffsetX: 0,
+    dupStartOffsetY: 0,
   })
 
   /** スクリーン座標でヒットテスト（選択中を最前面で判定） */
@@ -102,11 +111,16 @@ export function CanvasRoot() {
     if (count === 1) {
       dragState.current.isDragging = false
       dragState.current.mode = 'idle'
-      // PointerDown 時点でガラスを先取り検出 → ドラッグ閾値を下げる
-      dragState.current.pendingGlassId = hitTest(e.clientX, e.clientY)
+      if (activeTool === 'duplicate') {
+        // 複製モード: ドラッグ開始時のオフセットを記録
+        dragState.current.dupStartOffsetX = duplicateOffsetMm.x
+        dragState.current.dupStartOffsetY = duplicateOffsetMm.y
+        dragState.current.pendingGlassId = 'duplicate'  // 常にドラッグ開始できる
+      } else {
+        dragState.current.pendingGlassId = hitTest(e.clientX, e.clientY)
+      }
     }
     if (count === 2) {
-      // 2本指 → ビューポート操作へ移行
       dragState.current.mode = 'viewport'
       dragState.current.isDragging = false
       dragState.current.pendingGlassId = null
@@ -117,7 +131,7 @@ export function CanvasRoot() {
       dragState.current.prevPinchMidX = (pts[0].x + pts[1].x) / 2
       dragState.current.prevPinchMidY = (pts[0].y + pts[1].y) / 2
     }
-  }, [hitTest])
+  }, [hitTest, activeTool, duplicateOffsetMm])
 
   const onPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     const info = pointers.current.get(e.pointerId)
@@ -153,6 +167,19 @@ export function CanvasRoot() {
     // 1本指
     const dx = e.clientX - info.startX
     const dy = e.clientY - info.startY
+
+    // 複製ドラッグモード
+    if (activeTool === 'duplicate') {
+      if (Math.hypot(dx, dy) > 2) {
+        const startMm = screenToMm(info.startX, info.startY, viewport)
+        const currMm  = screenToMm(e.clientX, e.clientY, viewport)
+        moveDuplicateOffset(
+          ds.dupStartOffsetX + (currMm.x - startMm.x),
+          ds.dupStartOffsetY + (currMm.y - startMm.y),
+        )
+      }
+      return
+    }
 
     if (!ds.isDragging) {
       // ガラスを先取り検出済みなら閾値を下げる（2px）
@@ -239,7 +266,7 @@ export function CanvasRoot() {
         batchRotateGlasses(updates)
       }
     }
-  }, [viewport, setViewport, hitTest, items, selectedIds, selectGlass, moveGlass, batchMoveGlasses, rotateGlass, batchRotateGlasses])
+  }, [viewport, setViewport, hitTest, items, selectedIds, selectGlass, moveGlass, batchMoveGlasses, rotateGlass, batchRotateGlasses, activeTool, moveDuplicateOffset])
 
   const onPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     const info = pointers.current.get(e.pointerId)
@@ -247,16 +274,17 @@ export function CanvasRoot() {
 
     const ds = dragState.current
 
+    // 仮配置モード中はタップ判定・配置をスキップ
+    const inPlacementMode = activeTool !== 'none'
+
     if (ds.isDragging) {
       const isDragOrRotate =
         ds.mode === 'drag-glass' || ds.mode === 'drag-group' ||
         ds.mode === 'rotate-glass' || ds.mode === 'rotate-group'
-      if (isDragOrRotate) {
-        // 重なり状態でも常に確定（赤枠で警告を継続表示）
-        // ユーザーが自分で解決（移動または Undo）できる
+      if (isDragOrRotate && !inPlacementMode) {
         pushUndo(ds.preDragItems)
       }
-    } else if (info) {
+    } else if (info && !inPlacementMode) {
       // タップ判定
       const hitId = hitTest(info.startX, info.startY)
       if (hitId) {
@@ -289,7 +317,7 @@ export function CanvasRoot() {
       ds.prevPinchMidX = (pts[0].x + pts[1].x) / 2
       ds.prevPinchMidY = (pts[0].y + pts[1].y) / 2
     }
-  }, [hitTest, selectedIds, multiSelectMode, selectGlass, toggleSelectGlass, clearSelection, viewport, placeGlass, revertItems, pushUndo])
+  }, [hitTest, selectedIds, multiSelectMode, selectGlass, toggleSelectGlass, clearSelection, viewport, placeGlass, revertItems, pushUndo, activeTool])
 
   const onPointerCancel = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     pointers.current.delete(e.pointerId)
@@ -344,6 +372,7 @@ export function CanvasRoot() {
 
   // 選択ガラスを最前面に並び替えて描画
   const overlappingSet = useMemo(() => new Set(overlappingIds), [overlappingIds])
+  const previewOverlapSet = useMemo(() => new Set(previewOverlapIds), [previewOverlapIds])
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds])
   const sortedItems = useMemo(() => [
     ...items.filter(i => !selectedSet.has(i.id)),
@@ -419,7 +448,21 @@ export function CanvasRoot() {
             />
           ))}
 
-          {selectionOverlayProps && (
+          {/* 仮配置アイテム */}
+          {previewItems.map(item => (
+            <GlassPiece
+              key={item.id}
+              item={item}
+              isSelected={false}
+              isPreview={!previewOverlapSet.has(item.id)}
+              isPreviewError={previewOverlapSet.has(item.id)}
+            />
+          ))}
+
+          {/* 鏡像軸・放射中心オーバーレイ */}
+          <PlacementOverlay />
+
+          {selectionOverlayProps && activeTool === 'none' && (
             <SelectionOverlay
               centerXMm={selectionOverlayProps.centerXMm}
               topYMm={selectionOverlayProps.topYMm}

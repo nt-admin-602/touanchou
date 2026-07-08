@@ -14,6 +14,7 @@ export function FloatingTools() {
   const {
     selectedIds, multiSelectMode, items, viewport,
     deleteSelected, setMultiSelectMode,
+    startDuplicate, startMirror, startRadial, startPattern,
   } = useDesignStore()
   const panelRef = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ x: 0, y: 0 })
@@ -74,11 +75,11 @@ export function FloatingTools() {
       />
       <ToolBtn icon="🗑" label="削除" danger onClick={deleteSelected} />
 
-      {/* Phase 4 で有効化 */}
-      <ToolBtn icon="⧉" label="複製" disabled />
-      <ToolBtn icon="⇋" label="鏡像配置" disabled />
-      <ToolBtn icon="⋯" label="連続配置" disabled />
-      <ToolBtn icon="✳" label="放射対称" disabled />
+      {/* Phase 4 布置補助 */}
+      <ToolBtn icon="⧉" label="複製"       onClick={startDuplicate} />
+      <ToolBtn icon="⇋" label="鏡像配置"   onClick={startMirror} />
+      <ToolBtn icon="⋯" label="連続配置"   onClick={startPattern} />
+      <ToolBtn icon="✳" label="放射対称" onClick={startRadial} />
     </div>
   )
 }

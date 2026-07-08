@@ -1,11 +1,15 @@
 import { create } from 'zustand'
-import type { GlassItem, ShapeType, Viewport, Screen, DesignDocument, DraftBackup } from '../types'
+import type { GlassItem, ShapeType, Viewport, Screen, DesignDocument, DraftBackup, PlacementTool, MirrorAxis, PatternDirection } from '../types'
 import { DEFAULT_COLOR_ID } from '../config/colors'
 import { DEFAULT_GROUT_GAP_MM } from '../config/canvas'
 import { calcInitialViewport, snapMm, snapDeg, clampViewport } from '../utils/coordinates'
 import { findOverlappingIds } from '../utils/geometry'
 import { saveDesign as saveDesignDB, getDesign, loadDraft, saveDraft, clearDraft } from '../utils/storage'
 import { generateThumbnail } from '../utils/thumbnail'
+import {
+  computeDuplicateItems, computeMirrorItems, computeRadialItems,
+  computePatternItems, getPreviewOverlapIds,
+} from '../utils/placement'
 
 const MAX_UNDO = 50
 
@@ -92,6 +96,36 @@ type DesignState = {
   discardDraft: () => Promise<void>
   exportJSON: () => void
   importJSON: (jsonStr: string) => Promise<{ ok: boolean; error?: string }>
+
+  // 仮配置ツール（Phase 4）
+  activeTool: PlacementTool
+  previewItems: GlassItem[]
+  previewOverlapIds: string[]      // preview 内の重なり id
+
+  mirrorAxis: MirrorAxis
+  mirrorOriginMm: { x: number; y: number }
+
+  radialCount: 2 | 4 | 8 | 16
+  radialCenterMm: { x: number; y: number }
+
+  patternDirection: PatternDirection
+  patternRepeatCount: number
+
+  duplicateOffsetMm: { x: number; y: number }
+
+  startDuplicate: () => void
+  startMirror: () => void
+  startRadial: () => void
+  startPattern: () => void
+  setMirrorAxis: (axis: MirrorAxis) => void
+  setMirrorOriginMm: (x: number, y: number) => void
+  setRadialCount: (count: 2 | 4 | 8 | 16) => void
+  setRadialCenterMm: (x: number, y: number) => void
+  setPatternDirection: (dir: PatternDirection) => void
+  setPatternRepeatCount: (n: number) => void
+  moveDuplicateOffset: (x: number, y: number) => void
+  confirmPlacement: () => void
+  cancelPlacement: () => void
 }
 
 export const useDesignStore = create<DesignState>((set, get) => ({
@@ -110,6 +144,18 @@ export const useDesignStore = create<DesignState>((set, get) => ({
   designId: null,
   designName: '',
   isDirty: false,
+
+  // Phase 4 仮配置
+  activeTool: 'none' as PlacementTool,
+  previewItems: [],
+  previewOverlapIds: [],
+  mirrorAxis: 'horizontal' as MirrorAxis,
+  mirrorOriginMm: { x: 50, y: 50 },
+  radialCount: 4 as (2 | 4 | 8 | 16),
+  radialCenterMm: { x: 50, y: 50 },
+  patternDirection: 'right' as PatternDirection,
+  patternRepeatCount: 4,
+  duplicateOffsetMm: { x: 10, y: 10 },
 
   goToEditor: (widthMm, heightMm) => {
     set({
@@ -318,7 +364,130 @@ export const useDesignStore = create<DesignState>((set, get) => ({
   setPendingShape: (shape) => set({ pendingShape: shape }),
   setPendingColor: (colorId) => set({ pendingColorId: colorId }),
 
-  // ── Phase 3: 保存・管理 ──────────────────────────────────
+  // ── Phase 4: 仮配置ツール ────────────────────────────────────────────────
+
+  startDuplicate: () => {
+    const { items, selectedIds, canvasWidthMm, canvasHeightMm } = get()
+    if (selectedIds.length === 0) return
+    const src = items.filter(i => selectedIds.includes(i.id))
+    const offset = { x: 10, y: 10 }
+    const preview = computeDuplicateItems(src, offset.x, offset.y)
+    const overlapIds = getPreviewOverlapIds(items, preview)
+    set({
+      activeTool: 'duplicate', previewItems: preview, previewOverlapIds: overlapIds,
+      duplicateOffsetMm: offset,
+      mirrorOriginMm: { x: canvasWidthMm / 2, y: canvasHeightMm / 2 },
+      radialCenterMm:  { x: canvasWidthMm / 2, y: canvasHeightMm / 2 },
+    })
+  },
+
+  startMirror: () => {
+    const { items, selectedIds, canvasWidthMm, canvasHeightMm, mirrorAxis } = get()
+    if (selectedIds.length === 0) return
+    const src = items.filter(i => selectedIds.includes(i.id))
+    const origin = { x: canvasWidthMm / 2, y: canvasHeightMm / 2 }
+    const preview = computeMirrorItems(src, mirrorAxis, origin.x, origin.y)
+    set({
+      activeTool: 'mirror', previewItems: preview,
+      previewOverlapIds: getPreviewOverlapIds(items, preview),
+      mirrorOriginMm: origin,
+    })
+  },
+
+  startRadial: () => {
+    const { items, selectedIds, canvasWidthMm, canvasHeightMm, radialCount } = get()
+    if (selectedIds.length === 0) return
+    const src = items.filter(i => selectedIds.includes(i.id))
+    const center = { x: canvasWidthMm / 2, y: canvasHeightMm / 2 }
+    const preview = computeRadialItems(src, radialCount, center.x, center.y)
+    set({
+      activeTool: 'radial', previewItems: preview,
+      previewOverlapIds: getPreviewOverlapIds(items, preview),
+      radialCenterMm: center,
+    })
+  },
+
+  startPattern: () => {
+    const { items, selectedIds, patternDirection, patternRepeatCount } = get()
+    if (selectedIds.length === 0) return
+    const src = items.filter(i => selectedIds.includes(i.id))
+    const preview = computePatternItems(src, patternDirection, patternRepeatCount, DEFAULT_GROUT_GAP_MM)
+    set({
+      activeTool: 'pattern', previewItems: preview,
+      previewOverlapIds: getPreviewOverlapIds(items, preview),
+    })
+  },
+
+  setMirrorAxis: (axis) => {
+    const { items, selectedIds, mirrorOriginMm } = get()
+    const src = items.filter(i => selectedIds.includes(i.id))
+    const preview = computeMirrorItems(src, axis, mirrorOriginMm.x, mirrorOriginMm.y)
+    set({ mirrorAxis: axis, previewItems: preview, previewOverlapIds: getPreviewOverlapIds(items, preview) })
+  },
+
+  setMirrorOriginMm: (x, y) => {
+    const { items, selectedIds, mirrorAxis } = get()
+    const src = items.filter(i => selectedIds.includes(i.id))
+    const preview = computeMirrorItems(src, mirrorAxis, x, y)
+    set({ mirrorOriginMm: { x, y }, previewItems: preview, previewOverlapIds: getPreviewOverlapIds(items, preview) })
+  },
+
+  setRadialCount: (count) => {
+    const { items, selectedIds, radialCenterMm } = get()
+    const src = items.filter(i => selectedIds.includes(i.id))
+    const preview = computeRadialItems(src, count, radialCenterMm.x, radialCenterMm.y)
+    set({ radialCount: count, previewItems: preview, previewOverlapIds: getPreviewOverlapIds(items, preview) })
+  },
+
+  setRadialCenterMm: (x, y) => {
+    const { items, selectedIds, radialCount } = get()
+    const src = items.filter(i => selectedIds.includes(i.id))
+    const preview = computeRadialItems(src, radialCount, x, y)
+    set({ radialCenterMm: { x, y }, previewItems: preview, previewOverlapIds: getPreviewOverlapIds(items, preview) })
+  },
+
+  setPatternDirection: (dir) => {
+    const { items, selectedIds, patternRepeatCount } = get()
+    const src = items.filter(i => selectedIds.includes(i.id))
+    const preview = computePatternItems(src, dir, patternRepeatCount, DEFAULT_GROUT_GAP_MM)
+    set({ patternDirection: dir, previewItems: preview, previewOverlapIds: getPreviewOverlapIds(items, preview) })
+  },
+
+  setPatternRepeatCount: (n) => {
+    const clamped = Math.max(1, Math.min(16, n))
+    const { items, selectedIds, patternDirection } = get()
+    const src = items.filter(i => selectedIds.includes(i.id))
+    const preview = computePatternItems(src, patternDirection, clamped, DEFAULT_GROUT_GAP_MM)
+    set({ patternRepeatCount: clamped, previewItems: preview, previewOverlapIds: getPreviewOverlapIds(items, preview) })
+  },
+
+  moveDuplicateOffset: (x, y) => {
+    const { items, selectedIds } = get()
+    const src = items.filter(i => selectedIds.includes(i.id))
+    const preview = computeDuplicateItems(src, x, y)
+    set({ duplicateOffsetMm: { x, y }, previewItems: preview, previewOverlapIds: getPreviewOverlapIds(items, preview) })
+  },
+
+  confirmPlacement: () => {
+    const { items, previewItems, previewOverlapIds, undoStack } = get()
+    if (previewOverlapIds.length > 0) return
+    const newItems = [...items, ...previewItems]
+    const selected = previewItems.map(p => p.id)
+    set({
+      items: newItems,
+      selectedIds: selected,
+      activeTool: 'none',
+      previewItems: [],
+      previewOverlapIds: [],
+      overlappingIds: [],
+      undoStack: [...undoStack, items].slice(-MAX_UNDO),
+      redoStack: [],
+    })
+  },
+
+  cancelPlacement: () => {
+    set({ activeTool: 'none', previewItems: [], previewOverlapIds: [] })
+  },
 
   setDesignName: (name) => set({ designName: name }),
 

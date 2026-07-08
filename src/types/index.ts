@@ -53,3 +53,7 @@ export type GlassColor = {
 }
 
 export type Screen = 'new' | 'editor' | 'list'
+
+export type PlacementTool = 'none' | 'duplicate' | 'mirror' | 'radial' | 'pattern'
+export type MirrorAxis = 'horizontal' | 'vertical' | 'diagonal-fwd' | 'diagonal-bwd'
+export type PatternDirection = 'up' | 'down' | 'left' | 'right' | 'ul' | 'ur' | 'll' | 'lr'
