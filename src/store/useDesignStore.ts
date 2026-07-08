@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import type { GlassItem, ShapeType, Viewport, Screen, DesignDocument, DraftBackup } from '../types'
 import { DEFAULT_COLOR_ID } from '../config/colors'
 import { DEFAULT_GROUT_GAP_MM } from '../config/canvas'
-import { calcInitialViewport, snapMm, snapDeg } from '../utils/coordinates'
+import { calcInitialViewport, snapMm, snapDeg, clampViewport } from '../utils/coordinates'
 import { findOverlappingIds } from '../utils/geometry'
 import { saveDesign as saveDesignDB, getDesign, loadDraft, saveDraft, clearDraft } from '../utils/storage'
 import { generateThumbnail } from '../utils/thumbnail'
@@ -132,7 +132,10 @@ export const useDesignStore = create<DesignState>((set, get) => ({
 
   goToNew: () => set({ screen: 'new' }),
 
-  setViewport: (vp) => set({ viewport: vp }),
+  setViewport: (vp) => {
+    const { canvasWidthMm, canvasHeightMm } = get()
+    set({ viewport: clampViewport(vp, canvasWidthMm, canvasHeightMm, window.innerWidth, window.innerHeight) })
+  },
 
   initViewport: (screenW, screenH) => {
     const { canvasWidthMm, canvasHeightMm } = get()

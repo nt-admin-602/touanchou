@@ -35,6 +35,29 @@ export function snapDeg(deg: number): number {
   return Math.round(deg / ROTATION_SNAP_DEG) * ROTATION_SNAP_DEG
 }
 
+/** ビューポートの pan をクランプし、すべての辺で同一の最低マージンを強制 */
+const VIEWPORT_MARGIN_PX = 80
+const VIEWPORT_TOOLBAR_H = 48
+const VIEWPORT_PALETTE_H = 120
+
+export function clampViewport(
+  vp: Viewport,
+  canvasWidthMm: number,
+  canvasHeightMm: number,
+  screenW: number,
+  screenH: number,
+): Viewport {
+  const cw = canvasWidthMm * vp.zoom
+  const ch = canvasHeightMm * vp.zoom
+  const m = VIEWPORT_MARGIN_PX
+  // 各辺に最低 m px のキャンバスが見えるように pan を制限
+  return {
+    zoom: vp.zoom,
+    panX: Math.max(m - cw, Math.min(screenW - m, vp.panX)),
+    panY: Math.max(VIEWPORT_TOOLBAR_H + m - ch, Math.min(screenH - VIEWPORT_PALETTE_H - m, vp.panY)),
+  }
+}
+
 /** キャンバスを縦幅に合わせて拡大した初期 viewport を計算する */
 export function calcInitialViewport(
   canvasWidthMm: number,

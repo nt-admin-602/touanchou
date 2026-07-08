@@ -252,13 +252,9 @@ export function CanvasRoot() {
         ds.mode === 'drag-glass' || ds.mode === 'drag-group' ||
         ds.mode === 'rotate-glass' || ds.mode === 'rotate-group'
       if (isDragOrRotate) {
-        // 最新の重なり状態を確認して確定 or 元に戻す
-        const { overlappingIds: currentOverlaps } = useDesignStore.getState()
-        if (currentOverlaps.length > 0) {
-          revertItems(ds.preDragItems)
-        } else {
-          pushUndo(ds.preDragItems)
-        }
+        // 重なり状態でも常に確定（赤枠で警告を継続表示）
+        // ユーザーが自分で解決（移動または Undo）できる
+        pushUndo(ds.preDragItems)
       }
     } else if (info) {
       // タップ判定
