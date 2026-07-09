@@ -62,6 +62,7 @@ type DesignState = {
   selectGlass: (id: string | null) => void
   toggleSelectGlass: (id: string) => void
   clearSelection: () => void
+  replaceSelection: (ids: string[]) => void
   setMultiSelectMode: (on: boolean) => void
 
   // ライブ移動・回転（ドラッグ中, undo 不要）
@@ -242,7 +243,7 @@ export const useDesignStore = create<DesignState>((set, get) => ({
   },
 
   clearSelection: () => set({ selectedIds: [], multiSelectMode: false }),
-
+  replaceSelection: (ids) => set({ selectedIds: ids, multiSelectMode: ids.length > 1 }),
   setMultiSelectMode: (on) => set({ multiSelectMode: on }),
 
   moveGlass: (id, xMm, yMm) => {

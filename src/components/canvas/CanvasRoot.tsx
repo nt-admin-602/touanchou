@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, useMemo } from 'react'
+import { useRef, useEffect, useCallback, useMemo, useState } from 'react'
 import { useDesignStore } from '../../store/useDesignStore'
 import { CanvasGrid } from './CanvasGrid'
 import { GlassPiece } from './GlassPiece'
@@ -15,7 +15,7 @@ import type { GlassItem } from '../../types'
 const DRAG_THRESHOLD_PX = 6
 
 type PointerInfo = { x: number; y: number; startX: number; startY: number }
-type DragMode = 'idle' | 'drag-glass' | 'drag-group' | 'rotate-glass' | 'rotate-group' | 'viewport' | 'viewport-mouse'
+type DragMode = 'idle' | 'drag-glass' | 'drag-group' | 'rotate-glass' | 'rotate-group' | 'viewport' | 'viewport-mouse' | 'range-select'
 
 export function CanvasRoot() {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -26,11 +26,14 @@ export function CanvasRoot() {
     previewItems, previewOverlapIds, activeTool,
     pendingShape, pendingColorId, selectMode,
     viewport, setViewport, initViewport,
-    placeGlass, selectGlass, toggleSelectGlass, clearSelection,
+    placeGlass, selectGlass, toggleSelectGlass, clearSelection, replaceSelection,
     moveGlass, batchMoveGlasses, rotateGlass, batchRotateGlasses,
     pushUndo, revertItems,
     moveDuplicateOffset, duplicateOffsetMm,
   } = useDesignStore()
+
+  // 範囲選択ボックス（mm座標）
+  const [rangeBox, setRangeBox] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null)
 
   // 初期ビューポート
   useEffect(() => {
@@ -86,6 +89,9 @@ export function CanvasRoot() {
     // マウスパン
     viewportStartPanX: number
     viewportStartPanY: number
+    // 範囲選択（mm）
+    rangeStartX: number
+    rangeStartY: number
     // ピンチ状態
     prevPinchDist: number
     prevPinchMidX: number
@@ -106,6 +112,9 @@ export function CanvasRoot() {
     // マウスパン用
     viewportStartPanX: 0,
     viewportStartPanY: 0,
+    // 範囲選択用
+    rangeStartX: 0,
+    rangeStartY: 0,
   })
 
   /** スクリーン座標でヒットテスト（選択中を最前面で判定） */
@@ -254,12 +263,23 @@ export function CanvasRoot() {
                 selectGlass(hitId)
               }
             }
+          } else if (selectMode) {
+            // selectMode でガラスなし → 範囲選択開始
+            ds.mode = 'range-select'
+            const startMm = screenToMm(info.startX, info.startY, viewport)
+            ds.rangeStartX = startMm.x
+            ds.rangeStartY = startMm.y
           }
         }
       }
     }
 
     if (ds.isDragging) {
+      // 範囲選択: ボックスをリアルタイム更新
+      if (ds.mode === 'range-select') {
+        const currMm = screenToMm(e.clientX, e.clientY, viewport)
+        setRangeBox({ x1: ds.rangeStartX, y1: ds.rangeStartY, x2: currMm.x, y2: currMm.y })
+      }
       if (ds.mode === 'drag-glass' && ds.glassId) {
         const startMm = screenToMm(info.startX, info.startY, viewport)
         const currMm = screenToMm(e.clientX, e.clientY, viewport)
@@ -310,7 +330,7 @@ export function CanvasRoot() {
         batchRotateGlasses(updates)
       }
     }
-  }, [viewport, setViewport, hitTest, items, selectedIds, selectGlass, moveGlass, batchMoveGlasses, rotateGlass, batchRotateGlasses, activeTool, moveDuplicateOffset])
+  }, [viewport, setViewport, hitTest, items, selectedIds, selectGlass, moveGlass, batchMoveGlasses, rotateGlass, batchRotateGlasses, activeTool, moveDuplicateOffset, selectMode])
 
   const onPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     const info = pointers.current.get(e.pointerId)
@@ -328,11 +348,24 @@ export function CanvasRoot() {
       if (isDragOrRotate && !inPlacementMode) {
         pushUndo(ds.preDragItems)
       }
+      // 範囲選択確定
+      if (ds.mode === 'range-select' && rangeBox) {
+        const minXMm = Math.min(rangeBox.x1, rangeBox.x2)
+        const maxXMm = Math.max(rangeBox.x1, rangeBox.x2)
+        const minYMm = Math.min(rangeBox.y1, rangeBox.y2)
+        const maxYMm = Math.max(rangeBox.y1, rangeBox.y2)
+        const inside = items
+          .filter(item => item.xMm >= minXMm && item.xMm <= maxXMm && item.yMm >= minYMm && item.yMm <= maxYMm)
+          .map(item => item.id)
+        replaceSelection(inside)
+      }
+      // 範囲選択ボックスをクリア
+      setRangeBox(null)
     } else if (info && !inPlacementMode) {
       // タップ判定
       const hitId = hitTest(info.startX, info.startY)
       if (hitId) {
-        if (multiSelectMode) {
+        if (multiSelectMode || selectMode) {
           toggleSelectGlass(hitId)
         } else {
           const isSoleSelected = selectedIds.length === 1 && selectedIds[0] === hitId
@@ -381,7 +414,7 @@ export function CanvasRoot() {
       ds.prevPinchMidX = (pts[0].x + pts[1].x) / 2
       ds.prevPinchMidY = (pts[0].y + pts[1].y) / 2
     }
-  }, [hitTest, selectedIds, multiSelectMode, selectGlass, toggleSelectGlass, clearSelection, viewport, placeGlass, revertItems, pushUndo, activeTool, selectMode, items, pendingShape, pendingColorId])
+  }, [hitTest, selectedIds, multiSelectMode, selectGlass, toggleSelectGlass, clearSelection, replaceSelection, viewport, placeGlass, revertItems, pushUndo, activeTool, selectMode, items, pendingShape, pendingColorId, rangeBox])
 
   const onPointerCancel = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     pointers.current.delete(e.pointerId)
@@ -491,7 +524,9 @@ export function CanvasRoot() {
     >
       <div
         style={{
-          transform: `translate(${panX}px, ${panY}px) scale(${zoom})`,
+          // panY はウィンドウ絶対値だが CSS transform はコンテナ相対値
+          // コンテナはツールバー (48px) の下から始まるため 48px を引く
+          transform: `translate(${panX}px, ${panY - 48}px) scale(${zoom})`,
           transformOrigin: '0 0',
           willChange: 'transform',
         }}
@@ -526,6 +561,22 @@ export function CanvasRoot() {
 
           {/* 鏡像軸・放射中心オーバーレイ */}
           <PlacementOverlay />
+
+          {/* 範囲選択ボックス */}
+          {rangeBox && (
+            <rect
+              x={Math.min(rangeBox.x1, rangeBox.x2)}
+              y={Math.min(rangeBox.y1, rangeBox.y2)}
+              width={Math.abs(rangeBox.x2 - rangeBox.x1)}
+              height={Math.abs(rangeBox.y2 - rangeBox.y1)}
+              fill="rgba(59,130,246,0.1)"
+              stroke="#3b82f6"
+              strokeWidth={0.5}
+              strokeDasharray="2,1.5"
+              vectorEffect="non-scaling-stroke"
+              pointerEvents="none"
+            />
+          )}
 
           {selectionOverlayProps && activeTool === 'none' && (
             <SelectionOverlay

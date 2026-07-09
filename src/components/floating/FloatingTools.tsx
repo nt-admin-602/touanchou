@@ -29,7 +29,7 @@ export function FloatingTools() {
       const verts = rotateVertices(getShapeVertices(item.shape), item.rotationDeg)
       for (const v of verts) {
         const sx = (v.x + item.xMm) * viewport.zoom + viewport.panX
-        const sy = (v.y + item.yMm) * viewport.zoom + viewport.panY
+        const sy = (v.y + item.yMm) * viewport.zoom + viewport.panY - 48  // コンテナ補正
         if (sx < minX) minX = sx
         if (sx > maxX) maxX = sx
         if (sy < minY) minY = sy
@@ -38,15 +38,22 @@ export function FloatingTools() {
     }
     const cx = (minX + maxX) / 2
     const topY = minY
+    const bottomY = maxY
 
     const sw = window.innerWidth
     const sh = window.innerHeight
 
-    let x = cx - PANEL_W / 2
-    let y = topY - PANEL_H - 8
-
-    x = Math.max(4, Math.min(sw - PANEL_W - 4, x))
-    y = Math.max(TOOLBAR_H + 4, Math.min(sh - PALETTE_H - PANEL_H - 8, y))
+    let x = Math.max(4, Math.min(sw - PANEL_W - 4, cx - PANEL_W / 2))
+    // まず上に配置を試みる
+    let y = topY - PANEL_H - 12
+    if (y < TOOLBAR_H + 4) {
+      // 上に収まらなければ下に
+      y = bottomY + 12
+      if (y + PANEL_H > sh - PALETTE_H - 4) {
+        // 下にも収まらない → 上のうち最善位置へ
+        y = Math.max(TOOLBAR_H + 4, topY - PANEL_H - 12)
+      }
+    }
 
     setPos({ x, y })
   }, [selectedIds, items, viewport])
