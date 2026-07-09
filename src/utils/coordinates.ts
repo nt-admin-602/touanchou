@@ -58,19 +58,20 @@ export function clampViewport(
   }
 }
 
-/** キャンバスを縦幅に合わせて拡大した初期 viewport を計算する */
+/** キャンバスを縦幅合わせ・左端揃えで表示する初期 viewport を計算する */
 export function calcInitialViewport(
-  canvasWidthMm: number,
+  _canvasWidthMm: number,
   canvasHeightMm: number,
-  screenW: number,
+  _screenW: number,
   screenH: number,
   paddingPx = 16,
   paletteHeightPx = 120,
 ): Viewport {
   const availH = screenH - paletteHeightPx - paddingPx * 2 - 48 // toolbar
-  // 縦幅合わせ：キャンバス高さを利用可能高さにフィット
+  // 縦幅合わせ
   const zoom = availH / canvasHeightMm
-  const panX = (screenW - canvasWidthMm * zoom) / 2
+  // 左端を paddingPx に揃える
+  const panX = paddingPx
   const panY = 48 + paddingPx
   return { zoom, panX, panY }
 }

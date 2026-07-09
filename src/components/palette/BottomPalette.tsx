@@ -1,5 +1,4 @@
 import { GLASS_COLORS } from '../../config/colors'
-import { SHAPE_LABELS } from '../../config/shapes'
 import { useDesignStore } from '../../store/useDesignStore'
 import type { ShapeType } from '../../types'
 
@@ -11,19 +10,17 @@ export function BottomPalette() {
     pendingShape, pendingColorId,
     setPendingShape, setPendingColor,
     changeSelectedColor, changeSelectedShape,
+    selectMode, setSelectMode,
   } = useDesignStore()
 
   const hasSelection = selectedIds.length > 0
   const firstSelected = hasSelection ? items.find(i => i.id === selectedIds[0]) : undefined
-  // パレットのハイライトは選択中ガラスに合わせる
   const activeColorId = firstSelected?.colorId ?? pendingColorId
   const activeShape = firstSelected?.shape ?? pendingShape
 
   const handleColorTap = (colorId: string) => {
-    if (hasSelection) {
-      changeSelectedColor(colorId)
-    }
-    setPendingColor(colorId)  // 常に保持
+    if (hasSelection) changeSelectedColor(colorId)
+    setPendingColor(colorId)
   }
 
   const handleShapeTap = (shape: ShapeType) => {
@@ -31,6 +28,7 @@ export function BottomPalette() {
       changeSelectedShape(shape)
     } else {
       setPendingShape(shape)
+      setSelectMode(false)  // 形状選択時は配置モードに戻す
     }
   }
 
@@ -43,16 +41,28 @@ export function BottomPalette() {
             key={shape}
             onClick={() => handleShapeTap(shape)}
             className={[
-              'flex-1 py-2 rounded-lg text-sm font-medium border transition-colors',
-              activeShape === shape
+              'flex-1 py-2 rounded-lg border transition-colors',
+              activeShape === shape && !selectMode
                 ? 'bg-blue-500 border-blue-400 text-white'
                 : 'bg-gray-700 border-gray-600 text-gray-200 active:bg-gray-600',
             ].join(' ')}
           >
-            <ShapeIcon shape={shape} selected={activeShape === shape} />
-            <span className="block text-xs mt-0.5">{SHAPE_LABELS[shape]}</span>
+            <ShapeIcon shape={shape} selected={activeShape === shape && !selectMode} />
           </button>
         ))}
+        {/* 選択モードトグル */}
+        <button
+          onClick={() => setSelectMode(!selectMode)}
+          title={selectMode ? '配置モードに切替' : '選択モードに切替'}
+          className={[
+            'px-3 py-2 rounded-lg border transition-colors text-xl',
+            selectMode
+              ? 'bg-blue-500 border-blue-400 text-white'
+              : 'bg-gray-700 border-gray-600 text-gray-200 active:bg-gray-600',
+          ].join(' ')}
+        >
+          ☝
+        </button>
       </div>
 
       {/* 色パレット（横スクロール）*/}

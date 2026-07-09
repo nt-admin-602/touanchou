@@ -97,6 +97,10 @@ type DesignState = {
   exportJSON: () => void
   importJSON: (jsonStr: string) => Promise<{ ok: boolean; error?: string }>
 
+  // 選択モード（ON のとき配置せず選択のみ）
+  selectMode: boolean
+  setSelectMode: (on: boolean) => void
+
   // 仮配置ツール（Phase 4）
   activeTool: PlacementTool
   previewItems: GlassItem[]
@@ -144,6 +148,7 @@ export const useDesignStore = create<DesignState>((set, get) => ({
   designId: null,
   designName: '',
   isDirty: false,
+  selectMode: false,
 
   // Phase 4 仮配置
   activeTool: 'none' as PlacementTool,
@@ -171,12 +176,16 @@ export const useDesignStore = create<DesignState>((set, get) => ({
       designId: null,
       designName: '',
       isDirty: false,
+      selectMode: false,
+      activeTool: 'none',
+      previewItems: [],
+      previewOverlapIds: [],
     })
   },
 
-  goToList: () => set({ screen: 'list', selectedIds: [], multiSelectMode: false }),
+  goToList: () => set({ screen: 'list', selectedIds: [], multiSelectMode: false, selectMode: false }),
 
-  goToNew: () => set({ screen: 'new' }),
+  goToNew: () => set({ screen: 'new', selectMode: false }),
 
   setViewport: (vp) => {
     const { canvasWidthMm, canvasHeightMm } = get()
@@ -363,8 +372,7 @@ export const useDesignStore = create<DesignState>((set, get) => ({
 
   setPendingShape: (shape) => set({ pendingShape: shape }),
   setPendingColor: (colorId) => set({ pendingColorId: colorId }),
-
-  // ── Phase 4: 仮配置ツール ────────────────────────────────────────────────
+  setSelectMode: (on) => set({ selectMode: on }),
 
   startDuplicate: () => {
     const { items, selectedIds, canvasWidthMm, canvasHeightMm } = get()

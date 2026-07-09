@@ -8,6 +8,7 @@ import { screenToMm } from '../../utils/coordinates'
 import { applyPinchZoom } from '../../utils/coordinates'
 import {
   getShapeVertices, rotateVertices, pointInPolygon, getShapeBounds,
+  getItemWorldVertices, polygonsOverlap,
 } from '../../utils/geometry'
 import type { GlassItem } from '../../types'
 
@@ -23,6 +24,7 @@ export function CanvasRoot() {
     canvasWidthMm, canvasHeightMm,
     items, selectedIds, multiSelectMode, overlappingIds,
     previewItems, previewOverlapIds, activeTool,
+    pendingShape, pendingColorId, selectMode,
     viewport, setViewport, initViewport,
     placeGlass, selectGlass, toggleSelectGlass, clearSelection,
     moveGlass, batchMoveGlasses, rotateGlass, batchRotateGlasses,
@@ -295,12 +297,32 @@ export function CanvasRoot() {
           selectGlass(isSoleSelected ? null : hitId)
         }
       } else {
+        // 空白タップ
         if (selectedIds.length > 0) {
           clearSelection()
-        } else {
+        } else if (!selectMode) {
+          // 配置モード: 置こうとした位置が既存ガラスと重なる場合は選択に切替
           const mm = screenToMm(info.startX, info.startY, viewport)
-          placeGlass(mm.x, mm.y)
+          const snappedX = Math.round(mm.x), snappedY = Math.round(mm.y)
+          if (items.length > 0) {
+            const tempGlass = {
+              id: '__tmp__', shape: pendingShape, colorId: pendingColorId,
+              xMm: snappedX, yMm: snappedY, rotationDeg: 0,
+            } as import('../../types').GlassItem
+            const tempVerts = getItemWorldVertices(tempGlass)
+            const overlapItem = items.find(item =>
+              polygonsOverlap(tempVerts, getItemWorldVertices(item))
+            )
+            if (overlapItem) {
+              selectGlass(overlapItem.id)
+            } else {
+              placeGlass(mm.x, mm.y)
+            }
+          } else {
+            placeGlass(mm.x, mm.y)
+          }
         }
+        // selectMode ON + 空白タップ → 何もしない（または deselect は上で処理済み）
       }
     }
 
@@ -317,7 +339,7 @@ export function CanvasRoot() {
       ds.prevPinchMidX = (pts[0].x + pts[1].x) / 2
       ds.prevPinchMidY = (pts[0].y + pts[1].y) / 2
     }
-  }, [hitTest, selectedIds, multiSelectMode, selectGlass, toggleSelectGlass, clearSelection, viewport, placeGlass, revertItems, pushUndo, activeTool])
+  }, [hitTest, selectedIds, multiSelectMode, selectGlass, toggleSelectGlass, clearSelection, viewport, placeGlass, revertItems, pushUndo, activeTool, selectMode, items, pendingShape, pendingColorId])
 
   const onPointerCancel = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     pointers.current.delete(e.pointerId)
