@@ -4,7 +4,7 @@ import { CanvasGrid } from './CanvasGrid'
 import { GlassPiece } from './GlassPiece'
 import { SelectionOverlay } from './SelectionOverlay'
 import { PlacementOverlay } from './PlacementOverlay'
-import { screenToMm } from '../../utils/coordinates'
+import { screenToMm, snapMm, snapDeg } from '../../utils/coordinates'
 import { applyPinchZoom } from '../../utils/coordinates'
 import {
   getShapeVertices, rotateVertices, pointInPolygon, getShapeBounds,
@@ -22,8 +22,8 @@ export function CanvasRoot() {
 
   const {
     canvasWidthMm, canvasHeightMm,
-    items, selectedIds, multiSelectMode, overlappingIds,
-    previewItems, previewOverlapIds, activeTool,
+    items, selectedIds, multiSelectMode,
+    previewItems, activeTool,
     pendingShape, pendingColorId, selectMode,
     viewport, setViewport, initViewport,
     placeGlass, selectGlass, toggleSelectGlass, clearSelection, replaceSelection,
@@ -290,8 +290,11 @@ export function CanvasRoot() {
       if (ds.mode === 'drag-group') {
         const startMm = screenToMm(info.startX, info.startY, viewport)
         const currMm = screenToMm(e.clientX, e.clientY, viewport)
-        const dxMm = currMm.x - startMm.x
-        const dyMm = currMm.y - startMm.y
+        // デルタを1mm単位にスナップしてから全アイテムへ同じ量を加える。
+        // 各アイテムをそれぞれ丸めると、非整数mm位置のアイテム（放射対称・鏡像配置の結果など）
+        // 同士の相対位置がずれてマージン幅が不揃いになるため。
+        const dxMm = snapMm(currMm.x - startMm.x)
+        const dyMm = snapMm(currMm.y - startMm.y)
         const updates = [...ds.startPositions.entries()].map(([id, pos]) => ({
           id,
           xMm: pos.xMm + dxMm,
@@ -322,7 +325,8 @@ export function CanvasRoot() {
           e.clientY - centerScreen.y,
           e.clientX - centerScreen.x,
         ) * (180 / Math.PI)
-        const delta = angle - ds.startAngleDeg
+        // デルタを5度単位にスナップしてから全アイテムへ同じ量を加える（理由は drag-group と同様）
+        const delta = snapDeg(angle - ds.startAngleDeg)
         const updates = [...ds.startRotations.entries()].map(([id, startRot]) => ({
           id,
           rotationDeg: startRot + delta,
@@ -468,8 +472,6 @@ export function CanvasRoot() {
   }, [items, viewport, selectedIds])
 
   // 選択ガラスを最前面に並び替えて描画
-  const overlappingSet = useMemo(() => new Set(overlappingIds), [overlappingIds])
-  const previewOverlapSet = useMemo(() => new Set(previewOverlapIds), [previewOverlapIds])
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds])
   const sortedItems = useMemo(() => [
     ...items.filter(i => !selectedSet.has(i.id)),
@@ -544,7 +546,6 @@ export function CanvasRoot() {
               key={item.id}
               item={item}
               isSelected={selectedSet.has(item.id)}
-              isOverlapping={overlappingSet.has(item.id)}
             />
           ))}
 
@@ -554,8 +555,7 @@ export function CanvasRoot() {
               key={item.id}
               item={item}
               isSelected={false}
-              isPreview={!previewOverlapSet.has(item.id)}
-              isPreviewError={previewOverlapSet.has(item.id)}
+              isPreview
             />
           ))}
 

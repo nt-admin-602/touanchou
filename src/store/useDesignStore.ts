@@ -2,14 +2,14 @@ import { create } from 'zustand'
 import type { GlassItem, ShapeType, Viewport, Screen, DesignDocument, DraftBackup, PlacementTool, MirrorAxis, PatternDirection } from '../types'
 import { DEFAULT_COLOR_ID } from '../config/colors'
 import { DEFAULT_GROUT_GAP_MM } from '../config/canvas'
-import { calcInitialViewport, snapMm, snapDeg, clampViewport } from '../utils/coordinates'
-import { findOverlappingIds } from '../utils/geometry'
+import { calcInitialViewport, snapMm, snapDeg, clampViewport, getRadialDefaultCenterMm } from '../utils/coordinates'
+import { getItemWorldVertices } from '../utils/geometry'
 import { saveDesign as saveDesignDB, getDesign, loadDraft, saveDraft, clearDraft } from '../utils/storage'
 import { generateThumbnail } from '../utils/thumbnail'
 import { downloadDesignPNG } from '../utils/pngExport'
 import {
   computeDuplicateItems, computeMirrorItems, computeRadialItems,
-  computePatternItems, getPreviewOverlapIds,
+  computePatternItems,
 } from '../utils/placement'
 
 const MAX_UNDO = 50
@@ -31,7 +31,6 @@ type DesignState = {
   items: GlassItem[]
   selectedIds: string[]
   multiSelectMode: boolean
-  overlappingIds: string[]
 
   // パレット選択
   pendingShape: ShapeType
@@ -107,12 +106,11 @@ type DesignState = {
   // 仮配置ツール（Phase 4）
   activeTool: PlacementTool
   previewItems: GlassItem[]
-  previewOverlapIds: string[]      // preview 内の重なり id
 
   mirrorAxis: MirrorAxis
   mirrorOriginMm: { x: number; y: number }
 
-  radialCount: 2 | 4 | 8 | 16
+  radialCount: 2 | 4 | 6 | 8 | 16
   radialCenterMm: { x: number; y: number }
 
   patternDirection: PatternDirection
@@ -126,7 +124,7 @@ type DesignState = {
   startPattern: () => void
   setMirrorAxis: (axis: MirrorAxis) => void
   setMirrorOriginMm: (x: number, y: number) => void
-  setRadialCount: (count: 2 | 4 | 8 | 16) => void
+  setRadialCount: (count: 2 | 4 | 6 | 8 | 16) => void
   setRadialCenterMm: (x: number, y: number) => void
   setPatternDirection: (dir: PatternDirection) => void
   setPatternRepeatCount: (n: number) => void
@@ -142,7 +140,6 @@ export const useDesignStore = create<DesignState>((set, get) => ({
   items: [],
   selectedIds: [],
   multiSelectMode: false,
-  overlappingIds: [],
   pendingShape: 'diamond',
   pendingColorId: DEFAULT_COLOR_ID,
   viewport: { zoom: 3, panX: 0, panY: 0 },
@@ -156,10 +153,9 @@ export const useDesignStore = create<DesignState>((set, get) => ({
   // Phase 4 仮配置
   activeTool: 'none' as PlacementTool,
   previewItems: [],
-  previewOverlapIds: [],
   mirrorAxis: 'horizontal' as MirrorAxis,
   mirrorOriginMm: { x: 50, y: 50 },
-  radialCount: 4 as (2 | 4 | 8 | 16),
+  radialCount: 4 as (2 | 4 | 6 | 8 | 16),
   radialCenterMm: { x: 50, y: 50 },
   patternDirection: 'right' as PatternDirection,
   patternRepeatCount: 4,
@@ -173,7 +169,6 @@ export const useDesignStore = create<DesignState>((set, get) => ({
       items: [],
       selectedIds: [],
       multiSelectMode: false,
-      overlappingIds: [],
       undoStack: [],
       redoStack: [],
       designId: null,
@@ -182,7 +177,6 @@ export const useDesignStore = create<DesignState>((set, get) => ({
       selectMode: false,
       activeTool: 'none',
       previewItems: [],
-      previewOverlapIds: [],
     })
   },
 
@@ -220,7 +214,6 @@ export const useDesignStore = create<DesignState>((set, get) => ({
       selectedIds: [newItem.id],
       undoStack: [...undoStack, items].slice(-MAX_UNDO),
       redoStack: [],
-      overlappingIds: findOverlappingIds(newItems),
     })
   },
 
@@ -256,24 +249,24 @@ export const useDesignStore = create<DesignState>((set, get) => ({
     const newItems = items.map(item =>
       item.id === id ? { ...item, xMm: snappedX, yMm: snappedY } : item
     )
-    set({ items: newItems, overlappingIds: findOverlappingIds(newItems) })
+    set({ items: newItems })
   },
 
   batchMoveGlasses: (updates) => {
+    // xMm/yMm は呼び出し側で既に1mm単位のデルタを加算済み（各アイテムの元の
+    // 端数位置はそのまま保つことで、放射対称・鏡像配置由来のアイテム同士の
+    // 相対位置＝マージン幅を維持する）。ここでは境界チェックのみ行う。
     const { canvasWidthMm, canvasHeightMm, items } = get()
-    // 全アイテムが境界内に収まるか確認
     for (const u of updates) {
-      const sx = snapMm(u.xMm)
-      const sy = snapMm(u.yMm)
-      if (sx < 0 || sx > canvasWidthMm || sy < 0 || sy > canvasHeightMm) return
+      if (u.xMm < 0 || u.xMm > canvasWidthMm || u.yMm < 0 || u.yMm > canvasHeightMm) return
     }
     const updateMap = new Map(updates.map(u => [u.id, u]))
     const newItems = items.map(item => {
       const u = updateMap.get(item.id)
       if (!u) return item
-      return { ...item, xMm: snapMm(u.xMm), yMm: snapMm(u.yMm) }
+      return { ...item, xMm: u.xMm, yMm: u.yMm }
     })
-    set({ items: newItems, overlappingIds: findOverlappingIds(newItems) })
+    set({ items: newItems })
   },
 
   rotateGlass: (id, rotationDeg) => {
@@ -281,18 +274,21 @@ export const useDesignStore = create<DesignState>((set, get) => ({
     const newItems = items.map(item =>
       item.id === id ? { ...item, rotationDeg: snapDeg(rotationDeg) } : item
     )
-    set({ items: newItems, overlappingIds: findOverlappingIds(newItems) })
+    set({ items: newItems })
   },
 
   batchRotateGlasses: (updates) => {
+    // rotationDeg は呼び出し側で既に5度単位のデルタを加算済み（各アイテムの
+    // 元の端数角度はそのまま保つことで、放射対称・鏡像配置由来のアイテム同士の
+    // 相対角度を維持する）。ここでは 0-360 の範囲に正規化するだけ。
     const { items } = get()
     const updateMap = new Map(updates.map(u => [u.id, u]))
     const newItems = items.map(item => {
       const u = updateMap.get(item.id)
       if (!u) return item
-      return { ...item, rotationDeg: snapDeg(u.rotationDeg) }
+      return { ...item, rotationDeg: ((u.rotationDeg % 360) + 360) % 360 }
     })
-    set({ items: newItems, overlappingIds: findOverlappingIds(newItems) })
+    set({ items: newItems })
   },
 
   pushUndo: (snapshot) => {
@@ -301,7 +297,7 @@ export const useDesignStore = create<DesignState>((set, get) => ({
   },
 
   revertItems: (snapshot) => {
-    set({ items: snapshot, overlappingIds: [] })
+    set({ items: snapshot })
   },
 
   deleteSelected: () => {
@@ -313,7 +309,6 @@ export const useDesignStore = create<DesignState>((set, get) => ({
       items: newItems,
       selectedIds: [],
       multiSelectMode: false,
-      overlappingIds: [],
       undoStack: [...undoStack, items].slice(-MAX_UNDO),
       redoStack: [],
     })
@@ -356,7 +351,6 @@ export const useDesignStore = create<DesignState>((set, get) => ({
       undoStack: undoStack.slice(0, -1),
       redoStack: [...redoStack, items].slice(-MAX_UNDO),
       selectedIds: [],
-      overlappingIds: [],
     })
   },
 
@@ -369,7 +363,6 @@ export const useDesignStore = create<DesignState>((set, get) => ({
       redoStack: redoStack.slice(0, -1),
       undoStack: [...undoStack, items].slice(-MAX_UNDO),
       selectedIds: [],
-      overlappingIds: [],
     })
   },
 
@@ -383,9 +376,8 @@ export const useDesignStore = create<DesignState>((set, get) => ({
     const src = items.filter(i => selectedIds.includes(i.id))
     const offset = { x: 10, y: 10 }
     const preview = computeDuplicateItems(src, offset.x, offset.y)
-    const overlapIds = getPreviewOverlapIds(items, preview)
     set({
-      activeTool: 'duplicate', previewItems: preview, previewOverlapIds: overlapIds,
+      activeTool: 'duplicate', previewItems: preview,
       duplicateOffsetMm: offset,
       mirrorOriginMm: { x: canvasWidthMm / 2, y: canvasHeightMm / 2 },
       radialCenterMm:  { x: canvasWidthMm / 2, y: canvasHeightMm / 2 },
@@ -400,20 +392,19 @@ export const useDesignStore = create<DesignState>((set, get) => ({
     const preview = computeMirrorItems(src, mirrorAxis, origin.x, origin.y)
     set({
       activeTool: 'mirror', previewItems: preview,
-      previewOverlapIds: getPreviewOverlapIds(items, preview),
       mirrorOriginMm: origin,
     })
   },
 
   startRadial: () => {
-    const { items, selectedIds, canvasWidthMm, canvasHeightMm, radialCount } = get()
+    const { items, selectedIds, canvasWidthMm, canvasHeightMm, radialCount, viewport } = get()
     if (selectedIds.length === 0) return
     const src = items.filter(i => selectedIds.includes(i.id))
-    const center = { x: canvasWidthMm / 2, y: canvasHeightMm / 2 }
+    const selectionVertices = src.flatMap(getItemWorldVertices)
+    const center = getRadialDefaultCenterMm(selectionVertices, viewport, canvasWidthMm, canvasHeightMm)
     const preview = computeRadialItems(src, radialCount, center.x, center.y)
     set({
       activeTool: 'radial', previewItems: preview,
-      previewOverlapIds: getPreviewOverlapIds(items, preview),
       radialCenterMm: center,
     })
   },
@@ -425,7 +416,6 @@ export const useDesignStore = create<DesignState>((set, get) => ({
     const preview = computePatternItems(src, patternDirection, patternRepeatCount, DEFAULT_GROUT_GAP_MM)
     set({
       activeTool: 'pattern', previewItems: preview,
-      previewOverlapIds: getPreviewOverlapIds(items, preview),
     })
   },
 
@@ -433,35 +423,35 @@ export const useDesignStore = create<DesignState>((set, get) => ({
     const { items, selectedIds, mirrorOriginMm } = get()
     const src = items.filter(i => selectedIds.includes(i.id))
     const preview = computeMirrorItems(src, axis, mirrorOriginMm.x, mirrorOriginMm.y)
-    set({ mirrorAxis: axis, previewItems: preview, previewOverlapIds: getPreviewOverlapIds(items, preview) })
+    set({ mirrorAxis: axis, previewItems: preview })
   },
 
   setMirrorOriginMm: (x, y) => {
     const { items, selectedIds, mirrorAxis } = get()
     const src = items.filter(i => selectedIds.includes(i.id))
     const preview = computeMirrorItems(src, mirrorAxis, x, y)
-    set({ mirrorOriginMm: { x, y }, previewItems: preview, previewOverlapIds: getPreviewOverlapIds(items, preview) })
+    set({ mirrorOriginMm: { x, y }, previewItems: preview })
   },
 
   setRadialCount: (count) => {
     const { items, selectedIds, radialCenterMm } = get()
     const src = items.filter(i => selectedIds.includes(i.id))
     const preview = computeRadialItems(src, count, radialCenterMm.x, radialCenterMm.y)
-    set({ radialCount: count, previewItems: preview, previewOverlapIds: getPreviewOverlapIds(items, preview) })
+    set({ radialCount: count, previewItems: preview })
   },
 
   setRadialCenterMm: (x, y) => {
     const { items, selectedIds, radialCount } = get()
     const src = items.filter(i => selectedIds.includes(i.id))
     const preview = computeRadialItems(src, radialCount, x, y)
-    set({ radialCenterMm: { x, y }, previewItems: preview, previewOverlapIds: getPreviewOverlapIds(items, preview) })
+    set({ radialCenterMm: { x, y }, previewItems: preview })
   },
 
   setPatternDirection: (dir) => {
     const { items, selectedIds, patternRepeatCount } = get()
     const src = items.filter(i => selectedIds.includes(i.id))
     const preview = computePatternItems(src, dir, patternRepeatCount, DEFAULT_GROUT_GAP_MM)
-    set({ patternDirection: dir, previewItems: preview, previewOverlapIds: getPreviewOverlapIds(items, preview) })
+    set({ patternDirection: dir, previewItems: preview })
   },
 
   setPatternRepeatCount: (n) => {
@@ -469,19 +459,18 @@ export const useDesignStore = create<DesignState>((set, get) => ({
     const { items, selectedIds, patternDirection } = get()
     const src = items.filter(i => selectedIds.includes(i.id))
     const preview = computePatternItems(src, patternDirection, clamped, DEFAULT_GROUT_GAP_MM)
-    set({ patternRepeatCount: clamped, previewItems: preview, previewOverlapIds: getPreviewOverlapIds(items, preview) })
+    set({ patternRepeatCount: clamped, previewItems: preview })
   },
 
   moveDuplicateOffset: (x, y) => {
     const { items, selectedIds } = get()
     const src = items.filter(i => selectedIds.includes(i.id))
     const preview = computeDuplicateItems(src, x, y)
-    set({ duplicateOffsetMm: { x, y }, previewItems: preview, previewOverlapIds: getPreviewOverlapIds(items, preview) })
+    set({ duplicateOffsetMm: { x, y }, previewItems: preview })
   },
 
   confirmPlacement: () => {
-    const { items, previewItems, previewOverlapIds, undoStack } = get()
-    if (previewOverlapIds.length > 0) return
+    const { items, previewItems, undoStack } = get()
     const newItems = [...items, ...previewItems]
     const selected = previewItems.map(p => p.id)
     set({
@@ -489,15 +478,13 @@ export const useDesignStore = create<DesignState>((set, get) => ({
       selectedIds: selected,
       activeTool: 'none',
       previewItems: [],
-      previewOverlapIds: [],
-      overlappingIds: [],
       undoStack: [...undoStack, items].slice(-MAX_UNDO),
       redoStack: [],
     })
   },
 
   cancelPlacement: () => {
-    set({ activeTool: 'none', previewItems: [], previewOverlapIds: [] })
+    set({ activeTool: 'none', previewItems: [] })
   },
 
   setDesignName: (name) => set({ designName: name }),
@@ -538,7 +525,6 @@ export const useDesignStore = create<DesignState>((set, get) => ({
       items: doc.items,
       selectedIds: [],
       multiSelectMode: false,
-      overlappingIds: [],
       undoStack: [],
       redoStack: [],
       designId: doc.id,
@@ -561,7 +547,6 @@ export const useDesignStore = create<DesignState>((set, get) => ({
       items: doc.items,
       selectedIds: [],
       multiSelectMode: false,
-      overlappingIds: [],
       undoStack: backup.undoStack,
       redoStack: backup.redoStack,
       designId: doc.id.startsWith('unsaved-') ? null : doc.id,

@@ -122,17 +122,3 @@ export function polygonsOverlap(poly1: Vec2[], poly2: Vec2[]): boolean {
   return true
 }
 
-/** 全アイテム中で重なっているものの id 一覧を返す */
-export function findOverlappingIds(items: import('../types').GlassItem[]): string[] {
-  const vertsList = items.map(item => getItemWorldVertices(item))
-  const overlapping = new Set<string>()
-  for (let i = 0; i < items.length; i++) {
-    for (let j = i + 1; j < items.length; j++) {
-      if (polygonsOverlap(vertsList[i], vertsList[j])) {
-        overlapping.add(items[i].id)
-        overlapping.add(items[j].id)
-      }
-    }
-  }
-  return [...overlapping]
-}

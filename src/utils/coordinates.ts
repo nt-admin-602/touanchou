@@ -58,22 +58,97 @@ export function clampViewport(
   }
 }
 
-/** キャンバスを縦幅合わせ・左端揃えで表示する初期 viewport を計算する */
+/**
+ * キャンバスを縦幅合わせ・左端揃えで表示する初期 viewport を計算する。
+ * screenH は CanvasRoot コンテナ自身の高さ（ツールバー・パレットを除いた
+ * 実際の描画可能領域）がすでに渡される前提。ここで再度差し引かない。
+ */
 export function calcInitialViewport(
   _canvasWidthMm: number,
   canvasHeightMm: number,
   _screenW: number,
   screenH: number,
   paddingPx = 16,
-  paletteHeightPx = 120,
 ): Viewport {
-  const availH = screenH - paletteHeightPx - paddingPx * 2 - 48 // toolbar
+  const availH = screenH - paddingPx * 2
   // 縦幅合わせ
   const zoom = availH / canvasHeightMm
   // 左端を paddingPx に揃える
   const panX = paddingPx
   const panY = 48 + paddingPx
   return { zoom, panX, panY }
+}
+
+/**
+ * 現在ディスプレイに表示されている範囲（ツールバー・パレットを除く描画領域）を、
+ * キャンバス境界内にクランプした mm 座標の矩形として返す。
+ */
+function getVisibleCanvasRectMm(
+  vp: Viewport,
+  canvasWidthMm: number,
+  canvasHeightMm: number,
+  screenW: number,
+  screenH: number,
+): { left: number; right: number; top: number; bottom: number } {
+  const p1 = screenToMm(0, VIEWPORT_TOOLBAR_H, vp)
+  const p2 = screenToMm(screenW, screenH - VIEWPORT_PALETTE_H, vp)
+  const clampX = (v: number) => Math.min(canvasWidthMm, Math.max(0, v))
+  const clampY = (v: number) => Math.min(canvasHeightMm, Math.max(0, v))
+  return {
+    left:   clampX(Math.min(p1.x, p2.x)),
+    right:  clampX(Math.max(p1.x, p2.x)),
+    top:    clampY(Math.min(p1.y, p2.y)),
+    bottom: clampY(Math.max(p1.y, p2.y)),
+  }
+}
+
+/**
+ * 放射対称配置・鏡像配置の初期中心点を計算する。
+ * 選択ガラス（群）の頂点のうち、今画面に表示されている範囲内で最も空いている方向
+ * （上下左右のうち表示範囲の端までの距離が最大の方向）にある頂点を中心点にする。
+ * ひし形6枚の星型配置のように、頂点同士をきっちり合わせたい用途を想定している。
+ */
+export function getRadialDefaultCenterMm(
+  selectionVerticesMm: { x: number; y: number }[],
+  vp: Viewport,
+  canvasWidthMm: number,
+  canvasHeightMm: number,
+  screenW = window.innerWidth,
+  screenH = window.innerHeight,
+): { x: number; y: number } {
+  if (selectionVerticesMm.length === 0) {
+    return { x: canvasWidthMm / 2, y: canvasHeightMm / 2 }
+  }
+
+  const rect = getVisibleCanvasRectMm(vp, canvasWidthMm, canvasHeightMm, screenW, screenH)
+
+  let cx = 0, cy = 0
+  for (const v of selectionVerticesMm) { cx += v.x; cy += v.y }
+  cx /= selectionVerticesMm.length
+  cy /= selectionVerticesMm.length
+
+  const spaceUp = cy - rect.top
+  const spaceDown = rect.bottom - cy
+  const spaceLeft = cx - rect.left
+  const spaceRight = rect.right - cx
+  const maxSpace = Math.max(spaceUp, spaceDown, spaceLeft, spaceRight)
+
+  // 表示範囲内で最も空いている方向にある頂点（極値）を選ぶ
+  let best = selectionVerticesMm[0]
+  if (maxSpace === spaceDown) {
+    for (const v of selectionVerticesMm) if (v.y > best.y) best = v
+  } else if (maxSpace === spaceUp) {
+    for (const v of selectionVerticesMm) if (v.y < best.y) best = v
+  } else if (maxSpace === spaceRight) {
+    for (const v of selectionVerticesMm) if (v.x > best.x) best = v
+  } else {
+    for (const v of selectionVerticesMm) if (v.x < best.x) best = v
+  }
+
+  return {
+    x: Math.min(canvasWidthMm, Math.max(0, best.x)),
+    y: Math.min(canvasHeightMm, Math.max(0, best.y)),
+  }
 }
 
 /** ピンチズーム後の viewport を計算する（ピンチ中心を固定） */

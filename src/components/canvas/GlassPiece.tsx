@@ -5,29 +5,24 @@ import { getShapeVertices, rotateVertices, verticesToPoints } from '../../utils/
 type Props = {
   item: GlassItem
   isSelected: boolean
-  isOverlapping?: boolean
   isPreview?: boolean        // 仮配置（半透明・点線枠）
-  isPreviewError?: boolean   // 仮配置 + 重なりエラー（赤枠）
 }
 
-export function GlassPiece({ item, isSelected, isOverlapping, isPreview, isPreviewError }: Props) {
+export function GlassPiece({ item, isSelected, isPreview }: Props) {
   const color = getColor(item.colorId)
   const verts = rotateVertices(getShapeVertices(item.shape), item.rotationDeg)
   const points = verticesToPoints(verts)
 
   const isMirror = color.isMirror === true
-  const baseOpacity = isPreview || isPreviewError ? 0.45 : (isMirror ? 1 : color.opacity)
+  const baseOpacity = isPreview ? 0.45 : (isMirror ? 1 : color.opacity)
 
-  const strokeColor = isPreviewError ? '#ef4444'
-    : isOverlapping ? '#ef4444'
-    : isSelected ? '#2563eb'
-    : '#00000030'
-  const strokeWidth = (isPreviewError || isOverlapping || isSelected) ? 0.4 : 0.2
+  const strokeColor = isSelected ? '#2563eb' : '#00000030'
+  const strokeWidth = isSelected ? 0.4 : 0.2
 
   return (
     <g
       transform={`translate(${item.xMm}, ${item.yMm})`}
-      style={{ cursor: isPreview || isPreviewError ? 'default' : 'pointer' }}
+      style={{ cursor: isPreview ? 'default' : 'pointer' }}
     >
       {isMirror && (
         <defs>
@@ -48,11 +43,11 @@ export function GlassPiece({ item, isSelected, isOverlapping, isPreview, isPrevi
         vectorEffect="non-scaling-stroke"
       />
       {/* 仮配置: 点線枠 */}
-      {(isPreview || isPreviewError) && (
+      {isPreview && (
         <polygon
           points={points}
           fill="none"
-          stroke={isPreviewError ? '#ef4444' : '#94a3b8'}
+          stroke="#94a3b8"
           strokeWidth={1.5}
           strokeDasharray="2,1.5"
           vectorEffect="non-scaling-stroke"
@@ -60,24 +55,13 @@ export function GlassPiece({ item, isSelected, isOverlapping, isPreview, isPrevi
         />
       )}
       {/* 選択枠 */}
-      {isSelected && !isOverlapping && !isPreview && !isPreviewError && (
+      {isSelected && !isPreview && (
         <polygon
           points={points}
           fill="none"
           stroke="#2563eb"
           strokeWidth={1.5}
           strokeDasharray="2,1.5"
-          vectorEffect="non-scaling-stroke"
-          pointerEvents="none"
-        />
-      )}
-      {/* 重なりエラー枠 */}
-      {isOverlapping && !isPreview && !isPreviewError && (
-        <polygon
-          points={points}
-          fill="none"
-          stroke="#ef4444"
-          strokeWidth={1.5}
           vectorEffect="non-scaling-stroke"
           pointerEvents="none"
         />

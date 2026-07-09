@@ -26,13 +26,10 @@ export function PlacementToolbar() {
     radialCount, setRadialCount,
     patternDirection, setPatternDirection,
     patternRepeatCount, setPatternRepeatCount,
-    previewOverlapIds,
     confirmPlacement, cancelPlacement,
   } = useDesignStore()
 
   if (activeTool === 'none') return null
-
-  const hasOverlap = previewOverlapIds.length > 0
 
   const TITLE: Record<string, string> = {
     duplicate: '複製', mirror: '鏡像配置', radial: '放射対称', pattern: '連続配置',
@@ -43,9 +40,6 @@ export function PlacementToolbar() {
       {/* ヘッダー */}
       <div className="flex items-center justify-between px-3 py-2">
         <span className="text-white font-bold text-sm">{TITLE[activeTool] ?? ''}</span>
-        {hasOverlap && (
-          <span className="text-red-400 text-xs">重なりがあります</span>
-        )}
       </div>
 
       {/* ツール固有コントロール */}
@@ -80,7 +74,7 @@ export function PlacementToolbar() {
         {/* 放射対称: 展開数 */}
         {activeTool === 'radial' && (
           <div className="flex gap-2">
-            {([2, 4, 8, 16] as const).map(n => (
+            {([2, 4, 6, 8, 16] as const).map(n => (
               <button
                 key={n}
                 onClick={() => setRadialCount(n)}
@@ -152,13 +146,7 @@ export function PlacementToolbar() {
         </button>
         <button
           onClick={confirmPlacement}
-          disabled={hasOverlap}
-          className={[
-            'flex-1 py-3 rounded-xl font-bold',
-            hasOverlap
-              ? 'bg-gray-800 text-gray-500'
-              : 'bg-blue-500 text-white active:bg-blue-400',
-          ].join(' ')}
+          className="flex-1 py-3 rounded-xl font-bold bg-blue-500 text-white active:bg-blue-400"
         >
           確定
         </button>

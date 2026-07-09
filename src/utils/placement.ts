@@ -1,5 +1,5 @@
 import type { GlassItem, MirrorAxis, PatternDirection } from '../types'
-import { getShapeVertices, rotateVertices, findOverlappingIds } from './geometry'
+import { getShapeVertices, rotateVertices } from './geometry'
 
 let _previewCounter = 0
 function previewId(base: string, idx: number): string {
@@ -47,9 +47,9 @@ export function computeMirrorItems(
     return {
       ...item,
       id: previewId(item.id, i),
-      xMm: Math.round(nx),
-      yMm: Math.round(ny),
-      rotationDeg: ((Math.round(nr) % 360) + 360) % 360,
+      xMm: nx,
+      yMm: ny,
+      rotationDeg: ((nr % 360) + 360) % 360,
     }
   })
 }
@@ -58,7 +58,7 @@ export function computeMirrorItems(
 
 export function computeRadialItems(
   sourceItems: GlassItem[],
-  count: 2 | 4 | 8 | 16,
+  count: 2 | 4 | 6 | 8 | 16,
   cx: number,
   cy: number,
 ): GlassItem[] {
@@ -72,9 +72,9 @@ export function computeRadialItems(
       result.push({
         ...item,
         id: previewId(item.id, step * 1000 + result.length),
-        xMm: Math.round(cx + dx * cosA - dy * sinA),
-        yMm: Math.round(cy + dx * sinA + dy * cosA),
-        rotationDeg: ((item.rotationDeg + Math.round(angleDeg)) % 360 + 360) % 360,
+        xMm: cx + dx * cosA - dy * sinA,
+        yMm: cy + dx * sinA + dy * cosA,
+        rotationDeg: ((item.rotationDeg + angleDeg) % 360 + 360) % 360,
       })
     }
   }
@@ -123,16 +123,4 @@ export function computePatternItems(
     }
   }
   return result
-}
-
-// ── 重なりチェック ────────────────────────────────────────────────────────────
-
-/** preview アイテムが既存アイテムまたは他の preview と重なっている id 一覧 */
-export function getPreviewOverlapIds(
-  existingItems: GlassItem[],
-  previewItems: GlassItem[],
-): string[] {
-  if (previewItems.length === 0) return []
-  const allOverlaps = new Set(findOverlappingIds([...existingItems, ...previewItems]))
-  return previewItems.filter(p => allOverlaps.has(p.id)).map(p => p.id)
 }

@@ -13,6 +13,7 @@ const PANEL_H = 2 * TOOL_W + 1 * 4 + 2 * 4
 export function FloatingTools() {
   const {
     selectedIds, multiSelectMode, items, viewport,
+    activeTool, previewItems, radialCenterMm, mirrorOriginMm,
     deleteSelected, setMultiSelectMode,
     startDuplicate, startMirror, startRadial, startPattern,
   } = useDesignStore()
@@ -23,19 +24,30 @@ export function FloatingTools() {
     if (selectedIds.length === 0) return
 
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    const includePoint = (xMm: number, yMm: number) => {
+      const sx = xMm * viewport.zoom + viewport.panX
+      const sy = yMm * viewport.zoom + viewport.panY - 48  // コンテナ補正
+      if (sx < minX) minX = sx
+      if (sx > maxX) maxX = sx
+      if (sy < minY) minY = sy
+      if (sy > maxY) maxY = sy
+    }
+
     for (const id of selectedIds) {
       const item = items.find(i => i.id === id)
       if (!item) continue
       const verts = rotateVertices(getShapeVertices(item.shape), item.rotationDeg)
-      for (const v of verts) {
-        const sx = (v.x + item.xMm) * viewport.zoom + viewport.panX
-        const sy = (v.y + item.yMm) * viewport.zoom + viewport.panY - 48  // コンテナ補正
-        if (sx < minX) minX = sx
-        if (sx > maxX) maxX = sx
-        if (sy < minY) minY = sy
-        if (sy > maxY) maxY = sy
-      }
+      for (const v of verts) includePoint(v.x + item.xMm, v.y + item.yMm)
     }
+
+    // 仮配置中は中心点・軸・展開プレビューにも被らないようにする
+    if (activeTool === 'radial') includePoint(radialCenterMm.x, radialCenterMm.y)
+    if (activeTool === 'mirror') includePoint(mirrorOriginMm.x, mirrorOriginMm.y)
+    for (const item of previewItems) {
+      const verts = rotateVertices(getShapeVertices(item.shape), item.rotationDeg)
+      for (const v of verts) includePoint(v.x + item.xMm, v.y + item.yMm)
+    }
+
     const cx = (minX + maxX) / 2
     const topY = minY
     const bottomY = maxY
@@ -56,7 +68,7 @@ export function FloatingTools() {
     }
 
     setPos({ x, y })
-  }, [selectedIds, items, viewport])
+  }, [selectedIds, items, viewport, activeTool, previewItems, radialCenterMm, mirrorOriginMm])
 
   if (selectedIds.length === 0) return null
 
