@@ -6,6 +6,7 @@ import { calcInitialViewport, snapMm, snapDeg, clampViewport } from '../utils/co
 import { findOverlappingIds } from '../utils/geometry'
 import { saveDesign as saveDesignDB, getDesign, loadDraft, saveDraft, clearDraft } from '../utils/storage'
 import { generateThumbnail } from '../utils/thumbnail'
+import { downloadDesignPNG } from '../utils/pngExport'
 import {
   computeDuplicateItems, computeMirrorItems, computeRadialItems,
   computePatternItems, getPreviewOverlapIds,
@@ -96,6 +97,7 @@ type DesignState = {
   restoreDraft: (backup: DraftBackup) => void
   discardDraft: () => Promise<void>
   exportJSON: () => void
+  exportPNG: () => Promise<void>
   importJSON: (jsonStr: string) => Promise<{ ok: boolean; error?: string }>
 
   // 選択モード（ON のとき配置せず選択のみ）
@@ -593,6 +595,12 @@ export const useDesignStore = create<DesignState>((set, get) => ({
     a.download = `${doc.name}.json`
     a.click()
     URL.revokeObjectURL(url)
+  },
+
+  exportPNG: async () => {
+    const state = get()
+    const name = state.designName || '図案'
+    await downloadDesignPNG(state.items, state.canvasWidthMm, state.canvasHeightMm, name)
   },
 
   importJSON: async (jsonStr) => {

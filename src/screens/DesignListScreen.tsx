@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useDesignStore } from '../store/useDesignStore'
 import { listDesignMetas, deleteDesign, duplicateDesign, getDesign, renameDesign } from '../utils/storage'
+import { downloadDesignPNG } from '../utils/pngExport'
 import type { DesignMeta } from '../types'
 
 export function DesignListScreen() {
@@ -11,6 +12,7 @@ export function DesignListScreen() {
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [importError, setImportError] = useState('')
+  const [exportingPNGId, setExportingPNGId] = useState<string | null>(null)
 
   const reload = async () => {
     const list = await listDesignMetas()
@@ -58,6 +60,18 @@ export function DesignListScreen() {
     a.click()
     URL.revokeObjectURL(url)
     setMenuId(null)
+  }
+
+  const handleExportPNGFromList = async (id: string) => {
+    const doc = await getDesign(id)
+    if (!doc) return
+    setExportingPNGId(id)
+    try {
+      await downloadDesignPNG(doc.items, doc.canvasWidthMm, doc.canvasHeightMm, doc.name)
+    } finally {
+      setExportingPNGId(null)
+      setMenuId(null)
+    }
   }
 
   const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -157,10 +171,14 @@ export function DesignListScreen() {
 
                 {/* アクションメニュー */}
                 {menuId === design.id && (
-                  <div className="bg-gray-800 flex gap-1 px-4 py-2 border-t border-gray-700">
+                  <div className="bg-gray-800 flex flex-wrap gap-1.5 px-4 py-2 border-t border-gray-700">
                     <ActionBtn label="開く" onClick={() => handleOpen(design.id)} />
                     <ActionBtn label="名前変更" onClick={() => { setRenamingId(design.id); setRenameValue(design.name) }} />
                     <ActionBtn label="複製" onClick={() => handleDuplicate(design.id)} />
+                    <ActionBtn
+                      label={exportingPNGId === design.id ? 'PNG書き出し中…' : 'PNG書き出し'}
+                      onClick={() => handleExportPNGFromList(design.id)}
+                    />
                     <ActionBtn label="JSON書き出し" onClick={() => handleExportFromList(design.id)} />
                     <ActionBtn label="削除" danger onClick={() => handleDelete(design.id)} />
                   </div>

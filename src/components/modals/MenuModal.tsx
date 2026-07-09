@@ -6,7 +6,8 @@ type Props = {
 }
 
 export function MenuModal({ onClose }: Props) {
-  const { designName, setDesignName, goToList, goToNew, saveCurrentDesign, exportJSON, importJSON } = useDesignStore()
+  const { designName, setDesignName, goToList, goToNew, saveCurrentDesign, exportJSON, exportPNG, importJSON } = useDesignStore()
+  const [exportingPNG, setExportingPNG] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [nameInput, setNameInput] = useState(designName)
   const [importError, setImportError] = useState('')
@@ -30,6 +31,16 @@ export function MenuModal({ onClose }: Props) {
   const handleExport = () => {
     exportJSON()
     onClose()
+  }
+
+  const handleExportPNG = async () => {
+    setExportingPNG(true)
+    try {
+      await exportPNG()
+      onClose()
+    } finally {
+      setExportingPNG(false)
+    }
   }
 
   const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -93,6 +104,7 @@ export function MenuModal({ onClose }: Props) {
           <MenuItem icon="📋" label="図案一覧へ戻る" onClick={() => { goToList(); onClose() }} />
           <MenuItem icon="🆕" label="新規作成" onClick={() => { goToNew(); onClose() }} />
           <div className="border-t border-gray-800 my-1" />
+          <MenuItem icon="🖼️" label={exportingPNG ? 'PNG書き出し中…' : 'PNGエクスポート'} onClick={handleExportPNG} />
           <MenuItem icon="📤" label="JSONエクスポート" onClick={handleExport} />
           <MenuItem icon="📥" label="JSONインポート" onClick={() => fileInputRef.current?.click()} />
           {importError && (
