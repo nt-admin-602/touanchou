@@ -15,7 +15,7 @@ import type { GlassItem } from '../../types'
 const DRAG_THRESHOLD_PX = 6
 
 type PointerInfo = { x: number; y: number; startX: number; startY: number }
-type DragMode = 'idle' | 'drag-glass' | 'drag-group' | 'rotate-glass' | 'rotate-group' | 'viewport'
+type DragMode = 'idle' | 'drag-glass' | 'drag-group' | 'rotate-glass' | 'rotate-group' | 'viewport' | 'viewport-mouse'
 
 export function CanvasRoot() {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -39,6 +39,24 @@ export function CanvasRoot() {
     const { width, height } = el.getBoundingClientRect()
     initViewport(width, height)
   }, [initViewport, canvasWidthMm, canvasHeightMm])
+
+  // 最新 viewport を ref で追跡（ッールバック内で潜在的な古い値対策）
+  const viewportRef = useRef(viewport)
+  useEffect(() => { viewportRef.current = viewport }, [viewport])
+
+  // ホイールズーム（非パッシブ登録で preventDefault を有効化）
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const handler = (e: WheelEvent) => {
+      e.preventDefault()
+      const scaleRatio = Math.pow(0.998, e.deltaY)
+      const vp = viewportRef.current
+      setViewport(applyPinchZoom(vp, scaleRatio, e.clientX, e.clientY))
+    }
+    el.addEventListener('wheel', handler, { passive: false })
+    return () => el.removeEventListener('wheel', handler)
+  }, [setViewport])
 
   // ポインター追跡
   const pointers = useRef<Map<number, PointerInfo>>(new Map())
@@ -65,6 +83,9 @@ export function CanvasRoot() {
     // 複製ドラッグ
     dupStartOffsetX: number
     dupStartOffsetY: number
+    // マウスパン
+    viewportStartPanX: number
+    viewportStartPanY: number
     // ピンチ状態
     prevPinchDist: number
     prevPinchMidX: number
@@ -82,6 +103,9 @@ export function CanvasRoot() {
     // 複製ドラッグ用
     dupStartOffsetX: 0,
     dupStartOffsetY: 0,
+    // マウスパン用
+    viewportStartPanX: 0,
+    viewportStartPanY: 0,
   })
 
   /** スクリーン座標でヒットテスト（選択中を最前面で判定） */
@@ -112,14 +136,22 @@ export function CanvasRoot() {
 
     if (count === 1) {
       dragState.current.isDragging = false
-      dragState.current.mode = 'idle'
-      if (activeTool === 'duplicate') {
-        // 複製モード: ドラッグ開始時のオフセットを記録
-        dragState.current.dupStartOffsetX = duplicateOffsetMm.x
-        dragState.current.dupStartOffsetY = duplicateOffsetMm.y
-        dragState.current.pendingGlassId = 'duplicate'  // 常にドラッグ開始できる
+      if (e.button === 1 || e.button === 2) {
+        // 中ボタン / 右ボタン → マウスパン
+        dragState.current.mode = 'viewport-mouse'
+        dragState.current.pendingGlassId = null
+        dragState.current.viewportStartPanX = viewportRef.current.panX
+        dragState.current.viewportStartPanY = viewportRef.current.panY
+        dragState.current.isDragging = true
       } else {
-        dragState.current.pendingGlassId = hitTest(e.clientX, e.clientY)
+        dragState.current.mode = 'idle'
+        if (activeTool === 'duplicate') {
+          dragState.current.dupStartOffsetX = duplicateOffsetMm.x
+          dragState.current.dupStartOffsetY = duplicateOffsetMm.y
+          dragState.current.pendingGlassId = 'duplicate'
+        } else {
+          dragState.current.pendingGlassId = hitTest(e.clientX, e.clientY)
+        }
       }
     }
     if (count === 2) {
@@ -166,9 +198,19 @@ export function CanvasRoot() {
       return
     }
 
-    // 1本指
+    // 1本指 / マウス
     const dx = e.clientX - info.startX
     const dy = e.clientY - info.startY
+
+    // マウス右/中ボタンパン
+    if (ds.mode === 'viewport-mouse') {
+      setViewport({
+        zoom: viewportRef.current.zoom,
+        panX: ds.viewportStartPanX + (e.clientX - info.startX),
+        panY: ds.viewportStartPanY + (e.clientY - info.startY),
+      })
+      return
+    }
 
     // 複製ドラッグモード
     if (activeTool === 'duplicate') {
@@ -445,6 +487,7 @@ export function CanvasRoot() {
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerCancel}
+      onContextMenu={e => e.preventDefault()}
     >
       <div
         style={{
