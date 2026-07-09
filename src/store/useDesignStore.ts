@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import type { GlassItem, ShapeType, Viewport, Screen, DesignDocument, DraftBackup, PlacementTool, MirrorAxis, PatternDirection } from '../types'
 import { DEFAULT_COLOR_ID } from '../config/colors'
 import { DEFAULT_GROUT_GAP_MM } from '../config/canvas'
-import { calcInitialViewport, snapMm, snapDeg, clampViewport, getRadialDefaultCenterMm } from '../utils/coordinates'
+import { calcInitialViewport, snapMm, snapDeg, clampViewport, getRadialDefaultCenterMm, getVisibleCenterMm } from '../utils/coordinates'
 import { getItemWorldVertices } from '../utils/geometry'
 import { saveDesign as saveDesignDB, getDesign, loadDraft, saveDraft, clearDraft } from '../utils/storage'
 import { generateThumbnail } from '../utils/thumbnail'
@@ -385,10 +385,10 @@ export const useDesignStore = create<DesignState>((set, get) => ({
   },
 
   startMirror: () => {
-    const { items, selectedIds, canvasWidthMm, canvasHeightMm, mirrorAxis } = get()
+    const { items, selectedIds, canvasWidthMm, canvasHeightMm, mirrorAxis, viewport } = get()
     if (selectedIds.length === 0) return
     const src = items.filter(i => selectedIds.includes(i.id))
-    const origin = { x: canvasWidthMm / 2, y: canvasHeightMm / 2 }
+    const origin = getVisibleCenterMm(viewport, canvasWidthMm, canvasHeightMm)
     const preview = computeMirrorItems(src, mirrorAxis, origin.x, origin.y)
     set({
       activeTool: 'mirror', previewItems: preview,

@@ -103,6 +103,24 @@ function getVisibleCanvasRectMm(
 }
 
 /**
+ * 現在ディスプレイに表示されている範囲（キャンバスのうち今画面に映っている部分）の
+ * 中心を mm 座標で返す。鏡像配置の反転基準線の初期位置に使う。
+ */
+export function getVisibleCenterMm(
+  vp: Viewport,
+  canvasWidthMm: number,
+  canvasHeightMm: number,
+  screenW = window.innerWidth,
+  screenH = window.innerHeight,
+): { x: number; y: number } {
+  const rect = getVisibleCanvasRectMm(vp, canvasWidthMm, canvasHeightMm, screenW, screenH)
+  return {
+    x: (rect.left + rect.right) / 2,
+    y: (rect.top + rect.bottom) / 2,
+  }
+}
+
+/**
  * 放射対称配置・鏡像配置の初期中心点を計算する。
  * 選択ガラス（群）の頂点のうち、今画面に表示されている範囲内で最も空いている方向
  * （上下左右のうち表示範囲の端までの距離が最大の方向）にある頂点を中心点にする。
