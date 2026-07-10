@@ -7,12 +7,9 @@ export const DEFAULT_GROUT_GAP_MM = 2
 // Mサイズ: diamond縦置き7個分の高さ × 横30個分の幅
 function calcMSize() {
   const d = SHAPE_CONFIG.diamond
-  const side = d.sideLengthMm
-  const halfAngleRad = (d.acuteAngleDeg / 2) * (Math.PI / 180)
-  // diamond の縦方向高さ = 2 * side * sin(acuteAngle/2)
-  const diamondH = 2 * side * Math.sin(halfAngleRad)
-  // diamond の横方向幅 = 2 * side * cos(acuteAngle/2)
-  const diamondW = 2 * side * Math.cos(halfAngleRad)
+  // diamond の縦方向高さ = 長対角線、横方向幅 = 短対角線（縦置き配置のため）
+  const diamondH = d.longDiagonalMm
+  const diamondW = d.shortDiagonalMm
   const w = Math.round(diamondW * 30 + DEFAULT_GROUT_GAP_MM * 31)
   const h = Math.round(diamondH * 7  + DEFAULT_GROUT_GAP_MM * 8)
   return { widthMm: w, heightMm: h }

@@ -25,8 +25,11 @@ export function FloatingTools() {
 
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
     const includePoint = (xMm: number, yMm: number) => {
+      // FloatingTools は画面全体（root要素）基準の position: absolute のため、
+      // window絶対座標である viewport.panY をそのまま使う
+      // （CanvasRoot 内の -48 コンテナ補正はここでは不要かつ誤り）。
       const sx = xMm * viewport.zoom + viewport.panX
-      const sy = yMm * viewport.zoom + viewport.panY - 48  // コンテナ補正
+      const sy = yMm * viewport.zoom + viewport.panY
       if (sx < minX) minX = sx
       if (sx > maxX) maxX = sx
       if (sy < minY) minY = sy
@@ -49,25 +52,35 @@ export function FloatingTools() {
     }
 
     const cx = (minX + maxX) / 2
-    const topY = minY
-    const bottomY = maxY
+    const cy = (minY + maxY) / 2
 
     const sw = window.innerWidth
     const sh = window.innerHeight
+    const screenLeft = 4
+    const screenRight = sw - PANEL_W - 4
+    const screenTop = TOOLBAR_H + 4
+    const screenBottom = sh - PALETTE_H - 4
+    const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
 
-    let x = Math.max(4, Math.min(sw - PANEL_W - 4, cx - PANEL_W / 2))
-    // まず上に配置を試みる
-    let y = topY - PANEL_H - 12
-    if (y < TOOLBAR_H + 4) {
-      // 上に収まらなければ下に
-      y = bottomY + 12
-      if (y + PANEL_H > sh - PALETTE_H - 4) {
-        // 下にも収まらない → 上のうち最善位置へ
-        y = Math.max(TOOLBAR_H + 4, topY - PANEL_H - 12)
-      }
+    // 対象範囲（選択ガラス＋仮配置プレビュー＋中心点/軸）の外側に候補位置を作り、
+    // 画面内に完全に収まるものを優先的に選ぶ（上→下→右→左）。
+    // 上下候補は Y 方向で、左右候補は X 方向で範囲の外に出るため、
+    // 画面内に収まっている時点で対象範囲とは重ならないことが保証される。
+    const candidates = [
+      { x: clamp(cx - PANEL_W / 2, screenLeft, screenRight), y: minY - PANEL_H - 12 },
+      { x: clamp(cx - PANEL_W / 2, screenLeft, screenRight), y: maxY + 12 },
+      { x: maxX + 12, y: clamp(cy - PANEL_H / 2, screenTop, screenBottom) },
+      { x: minX - PANEL_W - 12, y: clamp(cy - PANEL_H / 2, screenTop, screenBottom) },
+    ]
+    const fitsScreen = (p: { x: number; y: number }) =>
+      p.x >= screenLeft && p.x <= screenRight && p.y >= screenTop && p.y <= screenBottom
+
+    const best = candidates.find(fitsScreen) ?? {
+      x: clamp(candidates[0].x, screenLeft, screenRight),
+      y: clamp(candidates[0].y, screenTop, screenBottom),
     }
 
-    setPos({ x, y })
+    setPos(best)
   }, [selectedIds, items, viewport, activeTool, previewItems, radialCenterMm, mirrorOriginMm])
 
   if (selectedIds.length === 0) return null

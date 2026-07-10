@@ -5,11 +5,10 @@ import { SHAPE_CONFIG } from '../config/shapes'
 export function getShapeVertices(shape: ShapeType): Array<{ x: number; y: number }> {
   switch (shape) {
     case 'diamond': {
-      const { sideLengthMm, acuteAngleDeg } = SHAPE_CONFIG.diamond
-      const halfAngleRad = (acuteAngleDeg / 2) * (Math.PI / 180)
-      // 縦置き（鋭角が上下）: 縦半幅 > 横半幅
-      const halfW = sideLengthMm * Math.sin(halfAngleRad) // 横半幅（短い方）
-      const halfH = sideLengthMm * Math.cos(halfAngleRad) // 縦半幅（長い方）
+      const { longDiagonalMm, shortDiagonalMm } = SHAPE_CONFIG.diamond
+      // 縦置き（鋭角が上下）: 長対角線が縦、短対角線が横
+      const halfH = longDiagonalMm / 2  // 縦半幅（長い方）
+      const halfW = shortDiagonalMm / 2 // 横半幅（短い方）
       return [
         { x: 0,      y: -halfH }, // 上（鋭角）
         { x: halfW,  y: 0      }, // 右
