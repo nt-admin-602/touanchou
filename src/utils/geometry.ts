@@ -96,6 +96,23 @@ export function getItemWorldVertices(item: import('../types').GlassItem): Vec2[]
   }))
 }
 
+/** 配置済みガラス群の外接矩形（mm単位）。ガラスがなければ null */
+export function getItemsBoundsMm(
+  items: import('../types').GlassItem[],
+): { minX: number; minY: number; maxX: number; maxY: number } | null {
+  if (items.length === 0) return null
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const item of items) {
+    for (const v of getItemWorldVertices(item)) {
+      if (v.x < minX) minX = v.x
+      if (v.x > maxX) maxX = v.x
+      if (v.y < minY) minY = v.y
+      if (v.y > maxY) maxY = v.y
+    }
+  }
+  return { minX, minY, maxX, maxY }
+}
+
 function projectOntoAxis(verts: Vec2[], axis: Vec2): [number, number] {
   let min = Infinity, max = -Infinity
   for (const v of verts) {

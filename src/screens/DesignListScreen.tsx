@@ -67,7 +67,7 @@ export function DesignListScreen() {
     if (!doc) return
     setExportingPNGId(id)
     try {
-      await downloadDesignPNG(doc.items, doc.canvasWidthMm, doc.canvasHeightMm, doc.name)
+      await downloadDesignPNG(doc.items, doc.name)
     } finally {
       setExportingPNGId(null)
       setMenuId(null)

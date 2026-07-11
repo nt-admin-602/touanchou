@@ -4,7 +4,7 @@ import { CanvasGrid } from './CanvasGrid'
 import { GlassPiece } from './GlassPiece'
 import { SelectionOverlay } from './SelectionOverlay'
 import { PlacementOverlay } from './PlacementOverlay'
-import { screenToMm, snapMm, snapDeg } from '../../utils/coordinates'
+import { screenToMm, snapDeg } from '../../utils/coordinates'
 import { applyPinchZoom } from '../../utils/coordinates'
 import {
   getShapeVertices, rotateVertices, pointInPolygon, getShapeBounds,
@@ -15,14 +15,17 @@ import type { GlassItem } from '../../types'
 const DRAG_THRESHOLD_PX = 6
 
 type PointerInfo = { x: number; y: number; startX: number; startY: number }
-type DragMode = 'idle' | 'drag-glass' | 'drag-group' | 'rotate-glass' | 'rotate-group' | 'viewport' | 'viewport-mouse' | 'range-select'
+type DragMode =
+  | 'idle' | 'drag-glass' | 'drag-group' | 'rotate-glass' | 'rotate-group'
+  | 'viewport' | 'viewport-mouse' | 'range-select'
+  | 'drag-radial-center' | 'drag-mirror-origin'
 
 export function CanvasRoot() {
   const containerRef = useRef<HTMLDivElement>(null)
 
   const {
     canvasWidthMm, canvasHeightMm,
-    items, selectedIds, multiSelectMode,
+    items, selectedIds,
     previewItems, activeTool,
     pendingShape, pendingColorId, selectMode,
     viewport, setViewport, initViewport,
@@ -30,6 +33,7 @@ export function CanvasRoot() {
     moveGlass, batchMoveGlasses, rotateGlass, batchRotateGlasses,
     pushUndo, revertItems,
     moveDuplicateOffset, duplicateOffsetMm,
+    radialCenterMm, setRadialCenterMm, mirrorOriginMm, setMirrorOriginMm,
   } = useDesignStore()
 
   // 範囲選択ボックス（mm座標）
@@ -97,6 +101,11 @@ export function CanvasRoot() {
     prevPinchMidX: number
     prevPinchMidY: number
     isDragging: boolean
+    // 放射対称中心点・鏡像基準点ドラッグ（mm）
+    centerDragStartX: number
+    centerDragStartY: number
+    centerDragStartOx: number
+    centerDragStartOy: number
   }>({
     mode: 'idle', glassId: '', startGlassX: 0, startGlassY: 0,
     startAngleDeg: 0, startRotationDeg: 0,
@@ -115,6 +124,11 @@ export function CanvasRoot() {
     // 範囲選択用
     rangeStartX: 0,
     rangeStartY: 0,
+    // 中心点/基準点ドラッグ用
+    centerDragStartX: 0,
+    centerDragStartY: 0,
+    centerDragStartOx: 0,
+    centerDragStartOy: 0,
   })
 
   /** スクリーン座標でヒットテスト（選択中を最前面で判定） */
@@ -290,11 +304,10 @@ export function CanvasRoot() {
       if (ds.mode === 'drag-group') {
         const startMm = screenToMm(info.startX, info.startY, viewport)
         const currMm = screenToMm(e.clientX, e.clientY, viewport)
-        // デルタを1mm単位にスナップしてから全アイテムへ同じ量を加える。
-        // 各アイテムをそれぞれ丸めると、非整数mm位置のアイテム（放射対称・鏡像配置の結果など）
-        // 同士の相対位置がずれてマージン幅が不揃いになるため。
-        const dxMm = snapMm(currMm.x - startMm.x)
-        const dyMm = snapMm(currMm.y - startMm.y)
+        // グリッドスナップなし。デルタをそのまま全アイテムへ加える
+        // （各アイテムの元の相対位置＝マージンはそのまま維持される）。
+        const dxMm = currMm.x - startMm.x
+        const dyMm = currMm.y - startMm.y
         const updates = [...ds.startPositions.entries()].map(([id, pos]) => ({
           id,
           xMm: pos.xMm + dxMm,
@@ -333,8 +346,19 @@ export function CanvasRoot() {
         }))
         batchRotateGlasses(updates)
       }
+      if (ds.mode === 'drag-radial-center' || ds.mode === 'drag-mirror-origin') {
+        const startMm = screenToMm(ds.centerDragStartX, ds.centerDragStartY, viewport)
+        const currMm = screenToMm(e.clientX, e.clientY, viewport)
+        const newX = ds.centerDragStartOx + (currMm.x - startMm.x)
+        const newY = ds.centerDragStartOy + (currMm.y - startMm.y)
+        if (ds.mode === 'drag-radial-center') {
+          setRadialCenterMm(newX, newY)
+        } else {
+          setMirrorOriginMm(newX, newY)
+        }
+      }
     }
-  }, [viewport, setViewport, hitTest, items, selectedIds, selectGlass, moveGlass, batchMoveGlasses, rotateGlass, batchRotateGlasses, activeTool, moveDuplicateOffset, selectMode])
+  }, [viewport, setViewport, hitTest, items, selectedIds, selectGlass, moveGlass, batchMoveGlasses, rotateGlass, batchRotateGlasses, activeTool, moveDuplicateOffset, selectMode, setRadialCenterMm, setMirrorOriginMm])
 
   const onPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     const info = pointers.current.get(e.pointerId)
@@ -369,7 +393,7 @@ export function CanvasRoot() {
       // タップ判定
       const hitId = hitTest(info.startX, info.startY)
       if (hitId) {
-        if (multiSelectMode || selectMode) {
+        if (selectMode) {
           toggleSelectGlass(hitId)
         } else {
           const isSoleSelected = selectedIds.length === 1 && selectedIds[0] === hitId
@@ -418,7 +442,7 @@ export function CanvasRoot() {
       ds.prevPinchMidX = (pts[0].x + pts[1].x) / 2
       ds.prevPinchMidY = (pts[0].y + pts[1].y) / 2
     }
-  }, [hitTest, selectedIds, multiSelectMode, selectGlass, toggleSelectGlass, clearSelection, replaceSelection, viewport, placeGlass, revertItems, pushUndo, activeTool, selectMode, items, pendingShape, pendingColorId, rangeBox])
+  }, [hitTest, selectedIds, selectGlass, toggleSelectGlass, clearSelection, replaceSelection, viewport, placeGlass, revertItems, pushUndo, activeTool, selectMode, items, pendingShape, pendingColorId, rangeBox])
 
   const onPointerCancel = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     pointers.current.delete(e.pointerId)
@@ -471,6 +495,33 @@ export function CanvasRoot() {
     })
   }, [items, viewport, selectedIds])
 
+  /**
+   * 放射対称の中心点・鏡像配置の反転基準点のドラッグ開始。
+   * 回転ハンドルと同様にコンテナ側でポインターを捕捉し、独自の
+   * pointermove/up は持たせない（小さいハンドルを掴み損ねると
+   * キャンバス側のパン/範囲選択に奪われ、ハンドルが「逃げる」ように見えるため）。
+   */
+  const onCenterHandlePointerDown = useCallback((
+    e: React.PointerEvent,
+    mode: 'drag-radial-center' | 'drag-mirror-origin',
+    originXMm: number,
+    originYMm: number,
+  ) => {
+    e.stopPropagation()
+    dragState.current.mode = mode
+    dragState.current.isDragging = true
+    dragState.current.centerDragStartX = e.clientX
+    dragState.current.centerDragStartY = e.clientY
+    dragState.current.centerDragStartOx = originXMm
+    dragState.current.centerDragStartOy = originYMm
+
+    containerRef.current?.setPointerCapture(e.pointerId)
+    pointers.current.set(e.pointerId, {
+      x: e.clientX, y: e.clientY,
+      startX: e.clientX, startY: e.clientY,
+    })
+  }, [])
+
   // 選択ガラスを最前面に並び替えて描画
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds])
   const sortedItems = useMemo(() => [
@@ -513,6 +564,21 @@ export function CanvasRoot() {
 
   const { zoom, panX, panY } = viewport
 
+  // グリッド描画範囲（表示範囲＋余白、キャンバス境界内にクランプ）。
+  // キャンバス全体ではなくこの範囲だけ描画することで、大きなキャンバスでも
+  // グリッド線の数を抑える。
+  const gridVisibleRect = useMemo(() => {
+    const marginMm = 30
+    const p1 = screenToMm(0, 48, viewport)
+    const p2 = screenToMm(window.innerWidth, window.innerHeight, viewport)
+    return {
+      minX: Math.max(0, Math.min(p1.x, p2.x) - marginMm),
+      maxX: Math.min(canvasWidthMm, Math.max(p1.x, p2.x) + marginMm),
+      minY: Math.max(0, Math.min(p1.y, p2.y) - marginMm),
+      maxY: Math.min(canvasHeightMm, Math.max(p1.y, p2.y) + marginMm),
+    }
+  }, [viewport, canvasWidthMm, canvasHeightMm])
+
   return (
     <div
       ref={containerRef}
@@ -539,7 +605,11 @@ export function CanvasRoot() {
           height={canvasHeightMm}
           style={{ overflow: 'visible', backgroundColor: 'white', display: 'block' }}
         >
-          <CanvasGrid widthMm={canvasWidthMm} heightMm={canvasHeightMm} zoom={zoom} />
+          <CanvasGrid
+            widthMm={canvasWidthMm} heightMm={canvasHeightMm} zoom={zoom}
+            visibleMinX={gridVisibleRect.minX} visibleMaxX={gridVisibleRect.maxX}
+            visibleMinY={gridVisibleRect.minY} visibleMaxY={gridVisibleRect.maxY}
+          />
 
           {sortedItems.map(item => (
             <GlassPiece
@@ -560,7 +630,10 @@ export function CanvasRoot() {
           ))}
 
           {/* 鏡像軸・放射中心オーバーレイ */}
-          <PlacementOverlay />
+          <PlacementOverlay
+            onRadialCenterPointerDown={(e) => onCenterHandlePointerDown(e, 'drag-radial-center', radialCenterMm.x, radialCenterMm.y)}
+            onMirrorOriginPointerDown={(e) => onCenterHandlePointerDown(e, 'drag-mirror-origin', mirrorOriginMm.x, mirrorOriginMm.y)}
+          />
 
           {/* 範囲選択ボックス */}
           {rangeBox && (

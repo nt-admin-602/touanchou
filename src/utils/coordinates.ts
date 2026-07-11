@@ -58,10 +58,16 @@ export function clampViewport(
   }
 }
 
+// キャンバスサイズが実質無制限（大きい固定値）のとき、縦幅合わせで
+// ズームがガラス片を扱えないほど小さくならないようにする下限
+const MIN_INITIAL_ZOOM = 6
+
 /**
  * キャンバスを縦幅合わせ・左端揃えで表示する初期 viewport を計算する。
  * screenH は CanvasRoot コンテナ自身の高さ（ツールバー・パレットを除いた
  * 実際の描画可能領域）がすでに渡される前提。ここで再度差し引かない。
+ * キャンバスが実質無制限の大きな値の場合、縦幅合わせのズームは使い物に
+ * ならないほど小さくなるため、下限（MIN_INITIAL_ZOOM）でクランプする。
  */
 export function calcInitialViewport(
   _canvasWidthMm: number,
@@ -71,8 +77,8 @@ export function calcInitialViewport(
   paddingPx = 16,
 ): Viewport {
   const availH = screenH - paddingPx * 2
-  // 縦幅合わせ
-  const zoom = availH / canvasHeightMm
+  // 縦幅合わせ（下限あり）
+  const zoom = Math.max(MIN_INITIAL_ZOOM, availH / canvasHeightMm)
   // 左端を paddingPx に揃える
   const panX = paddingPx
   const panY = 48 + paddingPx

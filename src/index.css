@@ -5,6 +5,12 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+button {
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+
 html, body, #root {
   margin: 0;
   padding: 0;

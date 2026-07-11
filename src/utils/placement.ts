@@ -58,7 +58,7 @@ export function computeMirrorItems(
 
 export function computeRadialItems(
   sourceItems: GlassItem[],
-  count: 2 | 4 | 6 | 8 | 16,
+  count: number,
   cx: number,
   cy: number,
 ): GlassItem[] {

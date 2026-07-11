@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { GlassItem, ShapeType, Viewport, Screen, DesignDocument, DraftBackup, PlacementTool, MirrorAxis, PatternDirection } from '../types'
 import { DEFAULT_COLOR_ID } from '../config/colors'
-import { DEFAULT_GROUT_GAP_MM } from '../config/canvas'
+import { DEFAULT_GROUT_GAP_MM, UNLIMITED_CANVAS_MM } from '../config/canvas'
 import { calcInitialViewport, snapMm, snapDeg, clampViewport, getRadialDefaultCenterMm, getVisibleCenterMm } from '../utils/coordinates'
 import { getItemWorldVertices } from '../utils/geometry'
 import { saveDesign as saveDesignDB, getDesign, loadDraft, saveDraft, clearDraft } from '../utils/storage'
@@ -30,7 +30,6 @@ type DesignState = {
   // ガラス
   items: GlassItem[]
   selectedIds: string[]
-  multiSelectMode: boolean
 
   // パレット選択
   pendingShape: ShapeType
@@ -63,7 +62,6 @@ type DesignState = {
   toggleSelectGlass: (id: string) => void
   clearSelection: () => void
   replaceSelection: (ids: string[]) => void
-  setMultiSelectMode: (on: boolean) => void
 
   // ライブ移動・回転（ドラッグ中, undo 不要）
   moveGlass: (id: string, xMm: number, yMm: number) => void
@@ -110,7 +108,7 @@ type DesignState = {
   mirrorAxis: MirrorAxis
   mirrorOriginMm: { x: number; y: number }
 
-  radialCount: 2 | 4 | 6 | 8 | 16
+  radialCount: number
   radialCenterMm: { x: number; y: number }
 
   patternDirection: PatternDirection
@@ -124,7 +122,7 @@ type DesignState = {
   startPattern: () => void
   setMirrorAxis: (axis: MirrorAxis) => void
   setMirrorOriginMm: (x: number, y: number) => void
-  setRadialCount: (count: 2 | 4 | 6 | 8 | 16) => void
+  setRadialCount: (count: number) => void
   setRadialCenterMm: (x: number, y: number) => void
   setPatternDirection: (dir: PatternDirection) => void
   setPatternRepeatCount: (n: number) => void
@@ -139,7 +137,6 @@ export const useDesignStore = create<DesignState>((set, get) => ({
   canvasHeightMm: 100,
   items: [],
   selectedIds: [],
-  multiSelectMode: false,
   pendingShape: 'diamond',
   pendingColorId: DEFAULT_COLOR_ID,
   viewport: { zoom: 3, panX: 0, panY: 0 },
@@ -155,7 +152,7 @@ export const useDesignStore = create<DesignState>((set, get) => ({
   previewItems: [],
   mirrorAxis: 'horizontal' as MirrorAxis,
   mirrorOriginMm: { x: 50, y: 50 },
-  radialCount: 4 as (2 | 4 | 6 | 8 | 16),
+  radialCount: 4,
   radialCenterMm: { x: 50, y: 50 },
   patternDirection: 'right' as PatternDirection,
   patternRepeatCount: 4,
@@ -168,7 +165,6 @@ export const useDesignStore = create<DesignState>((set, get) => ({
       canvasHeightMm: heightMm,
       items: [],
       selectedIds: [],
-      multiSelectMode: false,
       undoStack: [],
       redoStack: [],
       designId: null,
@@ -180,9 +176,10 @@ export const useDesignStore = create<DesignState>((set, get) => ({
     })
   },
 
-  goToList: () => set({ screen: 'list', selectedIds: [], multiSelectMode: false, selectMode: false }),
+  goToList: () => set({ screen: 'list', selectedIds: [], selectMode: false }),
 
-  goToNew: () => set({ screen: 'new', selectMode: false }),
+  // キャンバスサイズは指定せず、実質無制限のサイズですぐ編集画面へ入る
+  goToNew: () => get().goToEditor(UNLIMITED_CANVAS_MM, UNLIMITED_CANVAS_MM),
 
   setViewport: (vp) => {
     const { canvasWidthMm, canvasHeightMm } = get()
@@ -218,36 +215,29 @@ export const useDesignStore = create<DesignState>((set, get) => ({
   },
 
   selectGlass: (id) => {
-    if (id === null) {
-      set({ selectedIds: [], multiSelectMode: false })
-    } else {
-      set({ selectedIds: [id], multiSelectMode: false })
-    }
+    set({ selectedIds: id === null ? [] : [id] })
   },
 
   toggleSelectGlass: (id) => {
     set(state => {
-      const { selectedIds, multiSelectMode } = state
+      const { selectedIds } = state
       if (selectedIds.includes(id)) {
-        const newIds = selectedIds.filter(i => i !== id)
-        return { selectedIds: newIds, multiSelectMode: newIds.length > 0 ? multiSelectMode : false }
+        return { selectedIds: selectedIds.filter(i => i !== id) }
       } else {
         return { selectedIds: [...selectedIds, id] }
       }
     })
   },
 
-  clearSelection: () => set({ selectedIds: [], multiSelectMode: false }),
-  replaceSelection: (ids) => set({ selectedIds: ids, multiSelectMode: ids.length > 1 }),
-  setMultiSelectMode: (on) => set({ multiSelectMode: on }),
+  clearSelection: () => set({ selectedIds: [] }),
+  replaceSelection: (ids) => set({ selectedIds: ids }),
 
   moveGlass: (id, xMm, yMm) => {
+    // ドラッグ移動はグリッドスナップせず、そのままの位置を反映する
     const { canvasWidthMm, canvasHeightMm, items } = get()
-    const snappedX = snapMm(xMm)
-    const snappedY = snapMm(yMm)
-    if (snappedX < 0 || snappedX > canvasWidthMm || snappedY < 0 || snappedY > canvasHeightMm) return
+    if (xMm < 0 || xMm > canvasWidthMm || yMm < 0 || yMm > canvasHeightMm) return
     const newItems = items.map(item =>
-      item.id === id ? { ...item, xMm: snappedX, yMm: snappedY } : item
+      item.id === id ? { ...item, xMm, yMm } : item
     )
     set({ items: newItems })
   },
@@ -308,7 +298,6 @@ export const useDesignStore = create<DesignState>((set, get) => ({
     set({
       items: newItems,
       selectedIds: [],
-      multiSelectMode: false,
       undoStack: [...undoStack, items].slice(-MAX_UNDO),
       redoStack: [],
     })
@@ -434,10 +423,11 @@ export const useDesignStore = create<DesignState>((set, get) => ({
   },
 
   setRadialCount: (count) => {
+    const clamped = Math.max(2, Math.min(50, count))
     const { items, selectedIds, radialCenterMm } = get()
     const src = items.filter(i => selectedIds.includes(i.id))
-    const preview = computeRadialItems(src, count, radialCenterMm.x, radialCenterMm.y)
-    set({ radialCount: count, previewItems: preview })
+    const preview = computeRadialItems(src, clamped, radialCenterMm.x, radialCenterMm.y)
+    set({ radialCount: clamped, previewItems: preview })
   },
 
   setRadialCenterMm: (x, y) => {
@@ -455,7 +445,7 @@ export const useDesignStore = create<DesignState>((set, get) => ({
   },
 
   setPatternRepeatCount: (n) => {
-    const clamped = Math.max(1, Math.min(16, n))
+    const clamped = Math.max(1, Math.min(50, n))
     const { items, selectedIds, patternDirection } = get()
     const src = items.filter(i => selectedIds.includes(i.id))
     const preview = computePatternItems(src, patternDirection, clamped, DEFAULT_GROUT_GAP_MM)
@@ -505,7 +495,7 @@ export const useDesignStore = create<DesignState>((set, get) => ({
       items: state.items,
       dataVersion: 1,
     }
-    const thumbnail = await generateThumbnail(state.items, state.canvasWidthMm, state.canvasHeightMm)
+    const thumbnail = await generateThumbnail(state.items)
     await saveDesignDB({ ...doc, thumbnail })
     await clearDraft()
     set({
@@ -524,7 +514,6 @@ export const useDesignStore = create<DesignState>((set, get) => ({
       canvasHeightMm: doc.canvasHeightMm,
       items: doc.items,
       selectedIds: [],
-      multiSelectMode: false,
       undoStack: [],
       redoStack: [],
       designId: doc.id,
@@ -546,7 +535,6 @@ export const useDesignStore = create<DesignState>((set, get) => ({
       canvasHeightMm: doc.canvasHeightMm,
       items: doc.items,
       selectedIds: [],
-      multiSelectMode: false,
       undoStack: backup.undoStack,
       redoStack: backup.redoStack,
       designId: doc.id.startsWith('unsaved-') ? null : doc.id,
@@ -585,7 +573,7 @@ export const useDesignStore = create<DesignState>((set, get) => ({
   exportPNG: async () => {
     const state = get()
     const name = state.designName || '図案'
-    await downloadDesignPNG(state.items, state.canvasWidthMm, state.canvasHeightMm, name)
+    await downloadDesignPNG(state.items, name)
   },
 
   importJSON: async (jsonStr) => {
@@ -606,7 +594,7 @@ export const useDesignStore = create<DesignState>((set, get) => ({
         items: raw.items,
         dataVersion: Number(raw.dataVersion) || 1,
       }
-      const thumbnail = await generateThumbnail(doc.items, doc.canvasWidthMm, doc.canvasHeightMm)
+      const thumbnail = await generateThumbnail(doc.items)
       await saveDesignDB({ ...doc, thumbnail })
       return { ok: true }
     } catch {

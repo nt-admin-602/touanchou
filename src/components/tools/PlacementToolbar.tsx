@@ -73,21 +73,19 @@ export function PlacementToolbar() {
 
         {/* 放射対称: 展開数 */}
         {activeTool === 'radial' && (
-          <div className="flex gap-2">
-            {([2, 4, 6, 8, 16] as const).map(n => (
+          <div className="flex flex-col items-center gap-1">
+            <span className="text-gray-400 text-xs">展開数</span>
+            <div className="flex items-center gap-2">
               <button
-                key={n}
-                onClick={() => setRadialCount(n)}
-                className={[
-                  'flex-1 py-2 rounded-lg text-sm font-bold border',
-                  radialCount === n
-                    ? 'bg-blue-500 border-blue-400 text-white'
-                    : 'bg-gray-800 border-gray-600 text-gray-300 active:bg-gray-700',
-                ].join(' ')}
-              >
-                {n}
-              </button>
-            ))}
+                onClick={() => setRadialCount(radialCount - 1)}
+                className="w-9 h-9 rounded-lg bg-gray-800 text-white text-xl font-bold border border-gray-600 active:bg-gray-700"
+              >−</button>
+              <span className="w-8 text-white text-center font-bold">{radialCount}</span>
+              <button
+                onClick={() => setRadialCount(radialCount + 1)}
+                className="w-9 h-9 rounded-lg bg-gray-800 text-white text-xl font-bold border border-gray-600 active:bg-gray-700"
+              >＋</button>
+            </div>
           </div>
         )}
 

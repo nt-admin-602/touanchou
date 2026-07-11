@@ -1,21 +1,28 @@
-import { useRef } from 'react'
 import { useDesignStore } from '../../store/useDesignStore'
-import { screenToMm } from '../../utils/coordinates'
+
+const HIT_RADIUS_MM = 8    // 掴みやすさ優先の当たり判定（見た目より大きい）
+const VISIBLE_RADIUS_MM = 4 // 見た目の円の大きさ
+
+type Props = {
+  onRadialCenterPointerDown: (e: React.PointerEvent) => void
+  onMirrorOriginPointerDown: (e: React.PointerEvent) => void
+}
 
 /**
  * キャンバス内 SVG に重ねる仮配置ツール用オーバーレイ
  * - 鏡像軸の線とドラッグハンドル
  * - 放射対称の中心ポインターとドラッグハンドル
+ *
+ * ドラッグそのものは CanvasRoot 側の pointer capture に統合されている
+ * （回転ハンドルと同じ方式）。ここでは pointerDown を親へ委譲するだけ。
  */
-export function PlacementOverlay() {
+export function PlacementOverlay({ onRadialCenterPointerDown, onMirrorOriginPointerDown }: Props) {
   const {
     activeTool,
-    mirrorAxis, mirrorOriginMm, setMirrorOriginMm,
-    radialCenterMm, setRadialCenterMm,
-    canvasWidthMm, canvasHeightMm, viewport,
+    mirrorAxis, mirrorOriginMm,
+    radialCenterMm,
+    canvasWidthMm, canvasHeightMm,
   } = useDesignStore()
-
-  const dragRef = useRef<{ startX: number; startY: number; startOx: number; startOy: number } | null>(null)
 
   if (activeTool !== 'mirror' && activeTool !== 'radial') return null
 
@@ -36,35 +43,23 @@ export function PlacementOverlay() {
         x1 = ox - pad; y1 = oy - pad; x2 = ox + pad; y2 = oy + pad; break
     }
 
-    const onHandleDown = (e: React.PointerEvent) => {
-      e.stopPropagation()
-      ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
-      dragRef.current = { startX: e.clientX, startY: e.clientY, startOx: mirrorOriginMm.x, startOy: mirrorOriginMm.y }
-    }
-    const onHandleMove = (e: React.PointerEvent) => {
-      if (!dragRef.current) return
-      const startMm = screenToMm(dragRef.current.startX, dragRef.current.startY, viewport)
-      const currMm = screenToMm(e.clientX, e.clientY, viewport)
-      setMirrorOriginMm(
-        dragRef.current.startOx + (currMm.x - startMm.x),
-        dragRef.current.startOy + (currMm.y - startMm.y),
-      )
-    }
-    const onHandleUp = () => { dragRef.current = null }
-
     return (
       <g>
         <line x1={x1!} y1={y1!} x2={x2!} y2={y2!}
           stroke="#3b82f6" strokeWidth={0.5} strokeDasharray="3,2"
           vectorEffect="non-scaling-stroke" pointerEvents="none" />
-        {/* ドラッグハンドル */}
-        <circle cx={ox} cy={oy} r={4}
+        {/* 当たり判定（見た目より大きい透明円） */}
+        <circle cx={ox} cy={oy} r={HIT_RADIUS_MM}
+          fill="transparent"
+          vectorEffect="non-scaling-stroke"
+          style={{ cursor: 'grab', pointerEvents: 'all' }}
+          onPointerDown={onMirrorOriginPointerDown}
+        />
+        {/* 見た目のドラッグハンドル */}
+        <circle cx={ox} cy={oy} r={VISIBLE_RADIUS_MM}
           fill="#3b82f6" fillOpacity={0.9} stroke="white" strokeWidth={0.6}
           vectorEffect="non-scaling-stroke"
-          style={{ cursor: 'move', pointerEvents: 'all' }}
-          onPointerDown={onHandleDown}
-          onPointerMove={onHandleMove}
-          onPointerUp={onHandleUp}
+          pointerEvents="none"
         />
       </g>
     )
@@ -74,22 +69,6 @@ export function PlacementOverlay() {
   const RadialCenter = () => {
     const { x: cx, y: cy } = radialCenterMm
 
-    const onDown = (e: React.PointerEvent) => {
-      e.stopPropagation()
-      ;(e.currentTarget as SVGElement).setPointerCapture?.(e.pointerId)
-      dragRef.current = { startX: e.clientX, startY: e.clientY, startOx: cx, startOy: cy }
-    }
-    const onMove = (e: React.PointerEvent) => {
-      if (!dragRef.current) return
-      const startMm = screenToMm(dragRef.current.startX, dragRef.current.startY, viewport)
-      const currMm = screenToMm(e.clientX, e.clientY, viewport)
-      setRadialCenterMm(
-        dragRef.current.startOx + (currMm.x - startMm.x),
-        dragRef.current.startOy + (currMm.y - startMm.y),
-      )
-    }
-    const onUp = () => { dragRef.current = null }
-
     return (
       <g>
         {/* 十字 */}
@@ -97,11 +76,18 @@ export function PlacementOverlay() {
           stroke="#3b82f6" strokeWidth={0.5} vectorEffect="non-scaling-stroke" pointerEvents="none" />
         <line x1={cx} y1={cy - 5} x2={cx} y2={cy + 5}
           stroke="#3b82f6" strokeWidth={0.5} vectorEffect="non-scaling-stroke" pointerEvents="none" />
-        <circle cx={cx} cy={cy} r={4}
+        {/* 当たり判定（見た目より大きい透明円） */}
+        <circle cx={cx} cy={cy} r={HIT_RADIUS_MM}
+          fill="transparent"
+          vectorEffect="non-scaling-stroke"
+          style={{ cursor: 'grab', pointerEvents: 'all' }}
+          onPointerDown={onRadialCenterPointerDown}
+        />
+        {/* 見た目のドラッグハンドル */}
+        <circle cx={cx} cy={cy} r={VISIBLE_RADIUS_MM}
           fill="#3b82f6" fillOpacity={0.85} stroke="white" strokeWidth={0.6}
           vectorEffect="non-scaling-stroke"
-          style={{ cursor: 'move', pointerEvents: 'all' }}
-          onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp}
+          pointerEvents="none"
         />
       </g>
     )
