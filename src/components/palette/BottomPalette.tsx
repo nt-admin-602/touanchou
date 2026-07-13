@@ -39,7 +39,7 @@ export function BottomPalette() {
 
   return (
     <div className="shrink-0 bg-gray-900 pb-safe">
-      {/* 形状パレット + 選択モード + 編集ツール（横スクロール、PCはマウスドラッグでも可） */}
+      {/* 1段目: 選択モード + 編集ツール + 削除（横スクロール、PCはマウスドラッグでも可） */}
       <div
         ref={toolRowDrag.ref}
         onPointerDown={toolRowDrag.onPointerDown}
@@ -50,20 +50,6 @@ export function BottomPalette() {
         onClickCapture={toolRowDrag.onClickCapture}
         className="flex items-center gap-2 px-3 pt-2 pb-1 overflow-x-auto no-scrollbar cursor-grab active:cursor-grabbing"
       >
-        {SHAPES.map(shape => (
-          <button
-            key={shape}
-            onClick={() => handleShapeTap(shape)}
-            className={[
-              'shrink-0 w-11 py-2 rounded-lg border transition-colors',
-              activeShape === shape && !selectMode
-                ? 'bg-blue-500 border-blue-400 text-white'
-                : 'bg-gray-700 border-gray-600 text-gray-200 active:bg-gray-600',
-            ].join(' ')}
-          >
-            <ShapeIcon shape={shape} selected={activeShape === shape && !selectMode} />
-          </button>
-        ))}
         {/* 選択モードトグル */}
         <button
           onClick={() => setSelectMode(!selectMode)}
@@ -92,7 +78,25 @@ export function BottomPalette() {
         <ToolBtn icon="🗑" label="削除" danger disabled={!hasSelection} onClick={deleteSelected} />
       </div>
 
-      {/* 色パレット（横スクロール、PCはマウスドラッグでも可） */}
+      {/* 2段目: 形状パレット */}
+      <div className="flex gap-2 px-3 pt-1 pb-1">
+        {SHAPES.map(shape => (
+          <button
+            key={shape}
+            onClick={() => handleShapeTap(shape)}
+            className={[
+              'flex-1 py-2 rounded-lg border transition-colors',
+              activeShape === shape && !selectMode
+                ? 'bg-blue-500 border-blue-400 text-white'
+                : 'bg-gray-700 border-gray-600 text-gray-200 active:bg-gray-600',
+            ].join(' ')}
+          >
+            <ShapeIcon shape={shape} selected={activeShape === shape && !selectMode} />
+          </button>
+        ))}
+      </div>
+
+      {/* 3段目: 色パレット（横スクロール、PCはマウスドラッグでも可） */}
       <div
         ref={colorRowDrag.ref}
         onPointerDown={colorRowDrag.onPointerDown}
