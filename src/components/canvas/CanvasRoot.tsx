@@ -4,12 +4,13 @@ import { CanvasGrid } from './CanvasGrid'
 import { GlassPiece } from './GlassPiece'
 import { SelectionOverlay } from './SelectionOverlay'
 import { PlacementOverlay } from './PlacementOverlay'
-import { screenToMm, snapDeg } from '../../utils/coordinates'
+import { screenToMm, snapDeg, snapMm } from '../../utils/coordinates'
 import { applyPinchZoom } from '../../utils/coordinates'
 import {
   getShapeVertices, rotateVertices, pointInPolygon, getShapeBounds,
   getItemWorldVertices, polygonsOverlap,
 } from '../../utils/geometry'
+import { PATTERN_DIRECTION_UNIT } from '../../utils/placement'
 import type { GlassItem } from '../../types'
 
 const DRAG_THRESHOLD_PX = 6
@@ -18,7 +19,7 @@ type PointerInfo = { x: number; y: number; startX: number; startY: number }
 type DragMode =
   | 'idle' | 'drag-glass' | 'drag-group' | 'rotate-glass' | 'rotate-group'
   | 'viewport' | 'viewport-mouse' | 'range-select'
-  | 'drag-radial-center' | 'drag-mirror-origin'
+  | 'drag-radial-center' | 'drag-mirror-origin' | 'drag-pattern-gap'
 
 export function CanvasRoot() {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -27,13 +28,14 @@ export function CanvasRoot() {
     canvasWidthMm, canvasHeightMm,
     items, selectedIds,
     previewItems, activeTool,
-    pendingShape, pendingColorId, selectMode,
+    pendingShape, pendingColorId, selectMode, snapEnabled,
     viewport, setViewport, initViewport,
     placeGlass, selectGlass, toggleSelectGlass, clearSelection, replaceSelection,
-    moveGlass, batchMoveGlasses, rotateGlass, batchRotateGlasses,
+    moveGlass, batchMoveGlasses, rotateGlass, batchRotateGroup,
     pushUndo, revertItems,
     moveDuplicateOffset, duplicateOffsetMm,
     radialCenterMm, setRadialCenterMm, mirrorOriginMm, setMirrorOriginMm,
+    patternDirection, patternGapMm, setPatternGapMm,
   } = useDesignStore()
 
   // 範囲選択ボックス（mm座標）
@@ -106,6 +108,10 @@ export function CanvasRoot() {
     centerDragStartY: number
     centerDragStartOx: number
     centerDragStartOy: number
+    // 連続配置マージンドラッグ
+    patternGapDragStartX: number
+    patternGapDragStartY: number
+    patternGapDragStartGap: number
   }>({
     mode: 'idle', glassId: '', startGlassX: 0, startGlassY: 0,
     startAngleDeg: 0, startRotationDeg: 0,
@@ -129,6 +135,10 @@ export function CanvasRoot() {
     centerDragStartY: 0,
     centerDragStartOx: 0,
     centerDragStartOy: 0,
+    // 連続配置マージンドラッグ用
+    patternGapDragStartX: 0,
+    patternGapDragStartY: 0,
+    patternGapDragStartGap: 0,
   })
 
   /** スクリーン座標でヒットテスト（選択中を最前面で判定） */
@@ -304,10 +314,11 @@ export function CanvasRoot() {
       if (ds.mode === 'drag-group') {
         const startMm = screenToMm(info.startX, info.startY, viewport)
         const currMm = screenToMm(e.clientX, e.clientY, viewport)
-        // グリッドスナップなし。デルタをそのまま全アイテムへ加える
-        // （各アイテムの元の相対位置＝マージンはそのまま維持される）。
-        const dxMm = currMm.x - startMm.x
-        const dyMm = currMm.y - startMm.y
+        // snapEnabled が ON の場合のみデルタを1mm単位にスナップする。
+        // 各アイテムを個別にスナップすると相対位置＝マージンが崩れるため、
+        // 必ずデルタ側でスナップしてから全アイテムへ同じ量を加える。
+        const dxMm = snapEnabled ? snapMm(currMm.x - startMm.x) : currMm.x - startMm.x
+        const dyMm = snapEnabled ? snapMm(currMm.y - startMm.y) : currMm.y - startMm.y
         const updates = [...ds.startPositions.entries()].map(([id, pos]) => ({
           id,
           xMm: pos.xMm + dxMm,
@@ -338,13 +349,24 @@ export function CanvasRoot() {
           e.clientY - centerScreen.y,
           e.clientX - centerScreen.x,
         ) * (180 / Math.PI)
-        // デルタを5度単位にスナップしてから全アイテムへ同じ量を加える（理由は drag-group と同様）
+        // デルタを5度単位にスナップ（理由は drag-group と同様）。
+        // 選択範囲の外接中心を軸に、位置・向きの両方を含めて選択全体を1つの
+        // かたまりとして回転させる（各ガラスがその場で自転するのではない）。
         const delta = snapDeg(angle - ds.startAngleDeg)
-        const updates = [...ds.startRotations.entries()].map(([id, startRot]) => ({
-          id,
-          rotationDeg: startRot + delta,
-        }))
-        batchRotateGlasses(updates)
+        const rad = (delta * Math.PI) / 180
+        const cos = Math.cos(rad), sin = Math.sin(rad)
+        const updates = [...ds.startRotations.entries()].map(([id, startRot]) => {
+          const pos = ds.startPositions.get(id)
+          const dx = (pos?.xMm ?? ds.rotationCenterX) - ds.rotationCenterX
+          const dy = (pos?.yMm ?? ds.rotationCenterY) - ds.rotationCenterY
+          return {
+            id,
+            xMm: ds.rotationCenterX + dx * cos - dy * sin,
+            yMm: ds.rotationCenterY + dx * sin + dy * cos,
+            rotationDeg: startRot + delta,
+          }
+        })
+        batchRotateGroup(updates)
       }
       if (ds.mode === 'drag-radial-center' || ds.mode === 'drag-mirror-origin') {
         const startMm = screenToMm(ds.centerDragStartX, ds.centerDragStartY, viewport)
@@ -357,8 +379,17 @@ export function CanvasRoot() {
           setMirrorOriginMm(newX, newY)
         }
       }
+      if (ds.mode === 'drag-pattern-gap') {
+        const startMm = screenToMm(ds.patternGapDragStartX, ds.patternGapDragStartY, viewport)
+        const currMm = screenToMm(e.clientX, e.clientY, viewport)
+        const unit = PATTERN_DIRECTION_UNIT[patternDirection]
+        // ドラッグ移動量を配置方向の単位ベクトルへ投影した分だけマージンを増減する
+        const delta = (currMm.x - startMm.x) * unit.x + (currMm.y - startMm.y) * unit.y
+        const newGap = ds.patternGapDragStartGap + delta
+        setPatternGapMm(snapEnabled ? Math.round(newGap) : newGap)
+      }
     }
-  }, [viewport, setViewport, hitTest, items, selectedIds, selectGlass, moveGlass, batchMoveGlasses, rotateGlass, batchRotateGlasses, activeTool, moveDuplicateOffset, selectMode, setRadialCenterMm, setMirrorOriginMm])
+  }, [viewport, setViewport, hitTest, items, selectedIds, selectGlass, moveGlass, batchMoveGlasses, rotateGlass, batchRotateGroup, activeTool, moveDuplicateOffset, selectMode, setRadialCenterMm, setMirrorOriginMm, patternDirection, setPatternGapMm, snapEnabled])
 
   const onPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     const info = pointers.current.get(e.pointerId)
@@ -486,6 +517,12 @@ export function CanvasRoot() {
           return [id, item?.rotationDeg ?? 0]
         })
       )
+      dragState.current.startPositions = new Map(
+        selectedIds.map(id => {
+          const item = items.find(i => i.id === id)
+          return [id, { xMm: item?.xMm ?? centerXMm, yMm: item?.yMm ?? centerYMm }]
+        })
+      )
     }
 
     containerRef.current?.setPointerCapture(e.pointerId)
@@ -521,6 +558,22 @@ export function CanvasRoot() {
       startX: e.clientX, startY: e.clientY,
     })
   }, [])
+
+  /** 連続配置マージンハンドルの pointerDown（onCenterHandlePointerDown と同じ理由で統合） */
+  const onPatternGapPointerDown = useCallback((e: React.PointerEvent) => {
+    e.stopPropagation()
+    dragState.current.mode = 'drag-pattern-gap'
+    dragState.current.isDragging = true
+    dragState.current.patternGapDragStartX = e.clientX
+    dragState.current.patternGapDragStartY = e.clientY
+    dragState.current.patternGapDragStartGap = patternGapMm
+
+    containerRef.current?.setPointerCapture(e.pointerId)
+    pointers.current.set(e.pointerId, {
+      x: e.clientX, y: e.clientY,
+      startX: e.clientX, startY: e.clientY,
+    })
+  }, [patternGapMm])
 
   // 選択ガラスを最前面に並び替えて描画
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds])
@@ -561,6 +614,16 @@ export function CanvasRoot() {
     const cy = (minY + maxY) / 2
     return { centerXMm: cx, topYMm: minY, rotCenterX: cx, rotCenterY: cy }
   }, [selectedIds, items])
+
+  // 連続配置マージンハンドルの表示位置（最初のコピー群の重心）
+  const patternGapHandleMm = useMemo(() => {
+    if (activeTool !== 'pattern' || selectedIds.length === 0 || previewItems.length === 0) return null
+    const firstCopy = previewItems.slice(0, selectedIds.length)
+    if (firstCopy.length === 0) return null
+    const cx = firstCopy.reduce((sum, i) => sum + i.xMm, 0) / firstCopy.length
+    const cy = firstCopy.reduce((sum, i) => sum + i.yMm, 0) / firstCopy.length
+    return { x: cx, y: cy }
+  }, [activeTool, selectedIds, previewItems])
 
   const { zoom, panX, panY } = viewport
 
@@ -629,10 +692,12 @@ export function CanvasRoot() {
             />
           ))}
 
-          {/* 鏡像軸・放射中心オーバーレイ */}
+          {/* 鏡像軸・放射中心・連続配置マージンオーバーレイ */}
           <PlacementOverlay
             onRadialCenterPointerDown={(e) => onCenterHandlePointerDown(e, 'drag-radial-center', radialCenterMm.x, radialCenterMm.y)}
             onMirrorOriginPointerDown={(e) => onCenterHandlePointerDown(e, 'drag-mirror-origin', mirrorOriginMm.x, mirrorOriginMm.y)}
+            patternGapHandleMm={patternGapHandleMm}
+            onPatternGapPointerDown={onPatternGapPointerDown}
           />
 
           {/* 範囲選択ボックス */}

@@ -6,17 +6,23 @@ const VISIBLE_RADIUS_MM = 4 // 見た目の円の大きさ
 type Props = {
   onRadialCenterPointerDown: (e: React.PointerEvent) => void
   onMirrorOriginPointerDown: (e: React.PointerEvent) => void
+  patternGapHandleMm: { x: number; y: number } | null
+  onPatternGapPointerDown: (e: React.PointerEvent) => void
 }
 
 /**
  * キャンバス内 SVG に重ねる仮配置ツール用オーバーレイ
  * - 鏡像軸の線とドラッグハンドル
  * - 放射対称の中心ポインターとドラッグハンドル
+ * - 連続配置のマージン調整ハンドル
  *
  * ドラッグそのものは CanvasRoot 側の pointer capture に統合されている
  * （回転ハンドルと同じ方式）。ここでは pointerDown を親へ委譲するだけ。
  */
-export function PlacementOverlay({ onRadialCenterPointerDown, onMirrorOriginPointerDown }: Props) {
+export function PlacementOverlay({
+  onRadialCenterPointerDown, onMirrorOriginPointerDown,
+  patternGapHandleMm, onPatternGapPointerDown,
+}: Props) {
   const {
     activeTool,
     mirrorAxis, mirrorOriginMm,
@@ -24,7 +30,7 @@ export function PlacementOverlay({ onRadialCenterPointerDown, onMirrorOriginPoin
     canvasWidthMm, canvasHeightMm,
   } = useDesignStore()
 
-  if (activeTool !== 'mirror' && activeTool !== 'radial') return null
+  if (activeTool !== 'mirror' && activeTool !== 'radial' && activeTool !== 'pattern') return null
 
   // ── 鏡像軸 ────────────────────────────────────────────────────────────────
   const MirrorAxisLine = () => {
@@ -93,10 +99,35 @@ export function PlacementOverlay({ onRadialCenterPointerDown, onMirrorOriginPoin
     )
   }
 
+  // ── 連続配置マージン ─────────────────────────────────────────────────────
+  const PatternGapHandle = () => {
+    if (!patternGapHandleMm) return null
+    const { x: cx, y: cy } = patternGapHandleMm
+
+    return (
+      <g>
+        {/* 当たり判定（見た目より大きい透明円） */}
+        <circle cx={cx} cy={cy} r={HIT_RADIUS_MM}
+          fill="transparent"
+          vectorEffect="non-scaling-stroke"
+          style={{ cursor: 'ew-resize', pointerEvents: 'all' }}
+          onPointerDown={onPatternGapPointerDown}
+        />
+        {/* 見た目のドラッグハンドル */}
+        <circle cx={cx} cy={cy} r={VISIBLE_RADIUS_MM}
+          fill="#3b82f6" fillOpacity={0.85} stroke="white" strokeWidth={0.6}
+          vectorEffect="non-scaling-stroke"
+          pointerEvents="none"
+        />
+      </g>
+    )
+  }
+
   return (
     <>
       {activeTool === 'mirror' && <MirrorAxisLine />}
       {activeTool === 'radial' && <RadialCenter />}
+      {activeTool === 'pattern' && <PatternGapHandle />}
     </>
   )
 }

@@ -67,7 +67,7 @@ type DesignState = {
   moveGlass: (id: string, xMm: number, yMm: number) => void
   batchMoveGlasses: (updates: { id: string; xMm: number; yMm: number }[]) => void
   rotateGlass: (id: string, rotationDeg: number) => void
-  batchRotateGlasses: (updates: { id: string; rotationDeg: number }[]) => void
+  batchRotateGroup: (updates: { id: string; xMm: number; yMm: number; rotationDeg: number }[]) => void
 
   // ドラッグ確定 / 元に戻す
   pushUndo: (snapshot: GlassItem[]) => void
@@ -101,6 +101,10 @@ type DesignState = {
   selectMode: boolean
   setSelectMode: (on: boolean) => void
 
+  // 1mmグリッド吸着のオン/オフ（配置・単体/グループドラッグ移動に影響）
+  snapEnabled: boolean
+  setSnapEnabled: (on: boolean) => void
+
   // 仮配置ツール（Phase 4）
   activeTool: PlacementTool
   previewItems: GlassItem[]
@@ -113,6 +117,7 @@ type DesignState = {
 
   patternDirection: PatternDirection
   patternRepeatCount: number
+  patternGapMm: number
 
   duplicateOffsetMm: { x: number; y: number }
 
@@ -126,6 +131,7 @@ type DesignState = {
   setRadialCenterMm: (x: number, y: number) => void
   setPatternDirection: (dir: PatternDirection) => void
   setPatternRepeatCount: (n: number) => void
+  setPatternGapMm: (n: number) => void
   moveDuplicateOffset: (x: number, y: number) => void
   confirmPlacement: () => void
   cancelPlacement: () => void
@@ -146,6 +152,7 @@ export const useDesignStore = create<DesignState>((set, get) => ({
   designName: '',
   isDirty: false,
   selectMode: false,
+  snapEnabled: true,
 
   // Phase 4 仮配置
   activeTool: 'none' as PlacementTool,
@@ -156,6 +163,7 @@ export const useDesignStore = create<DesignState>((set, get) => ({
   radialCenterMm: { x: 50, y: 50 },
   patternDirection: 'right' as PatternDirection,
   patternRepeatCount: 4,
+  patternGapMm: DEFAULT_GROUT_GAP_MM,
   duplicateOffsetMm: { x: 10, y: 10 },
 
   goToEditor: (widthMm, heightMm) => {
@@ -193,9 +201,9 @@ export const useDesignStore = create<DesignState>((set, get) => ({
   },
 
   placeGlass: (xMm, yMm) => {
-    const { pendingShape, pendingColorId, canvasWidthMm, canvasHeightMm, items, undoStack } = get()
-    const snappedX = snapMm(xMm)
-    const snappedY = snapMm(yMm)
+    const { pendingShape, pendingColorId, canvasWidthMm, canvasHeightMm, items, undoStack, snapEnabled } = get()
+    const snappedX = snapEnabled ? snapMm(xMm) : xMm
+    const snappedY = snapEnabled ? snapMm(yMm) : yMm
     if (snappedX < 0 || snappedX > canvasWidthMm || snappedY < 0 || snappedY > canvasHeightMm) return
     const newItem: GlassItem = {
       id: genId(),
@@ -233,11 +241,13 @@ export const useDesignStore = create<DesignState>((set, get) => ({
   replaceSelection: (ids) => set({ selectedIds: ids }),
 
   moveGlass: (id, xMm, yMm) => {
-    // ドラッグ移動はグリッドスナップせず、そのままの位置を反映する
-    const { canvasWidthMm, canvasHeightMm, items } = get()
-    if (xMm < 0 || xMm > canvasWidthMm || yMm < 0 || yMm > canvasHeightMm) return
+    // snapEnabled が ON の場合のみ1mmグリッドへスナップする
+    const { canvasWidthMm, canvasHeightMm, items, snapEnabled } = get()
+    const x = snapEnabled ? snapMm(xMm) : xMm
+    const y = snapEnabled ? snapMm(yMm) : yMm
+    if (x < 0 || x > canvasWidthMm || y < 0 || y > canvasHeightMm) return
     const newItems = items.map(item =>
-      item.id === id ? { ...item, xMm, yMm } : item
+      item.id === id ? { ...item, xMm: x, yMm: y } : item
     )
     set({ items: newItems })
   },
@@ -267,16 +277,19 @@ export const useDesignStore = create<DesignState>((set, get) => ({
     set({ items: newItems })
   },
 
-  batchRotateGlasses: (updates) => {
-    // rotationDeg は呼び出し側で既に5度単位のデルタを加算済み（各アイテムの
-    // 元の端数角度はそのまま保つことで、放射対称・鏡像配置由来のアイテム同士の
-    // 相対角度を維持する）。ここでは 0-360 の範囲に正規化するだけ。
-    const { items } = get()
+  batchRotateGroup: (updates) => {
+    // 複数選択の回転は、選択範囲の外接中心を軸に位置・向きの両方をまとめて
+    // 回転させる（各ガラスがその場で自転するのではなく、集団として回る）。
+    // xMm/yMm/rotationDeg は呼び出し側で既に5度単位のデルタ回転を適用済みの値。
+    const { canvasWidthMm, canvasHeightMm, items } = get()
+    for (const u of updates) {
+      if (u.xMm < 0 || u.xMm > canvasWidthMm || u.yMm < 0 || u.yMm > canvasHeightMm) return
+    }
     const updateMap = new Map(updates.map(u => [u.id, u]))
     const newItems = items.map(item => {
       const u = updateMap.get(item.id)
       if (!u) return item
-      return { ...item, rotationDeg: ((u.rotationDeg % 360) + 360) % 360 }
+      return { ...item, xMm: u.xMm, yMm: u.yMm, rotationDeg: ((u.rotationDeg % 360) + 360) % 360 }
     })
     set({ items: newItems })
   },
@@ -358,6 +371,7 @@ export const useDesignStore = create<DesignState>((set, get) => ({
   setPendingShape: (shape) => set({ pendingShape: shape }),
   setPendingColor: (colorId) => set({ pendingColorId: colorId }),
   setSelectMode: (on) => set({ selectMode: on }),
+  setSnapEnabled: (on) => set({ snapEnabled: on }),
 
   startDuplicate: () => {
     const { items, selectedIds, canvasWidthMm, canvasHeightMm } = get()
@@ -399,10 +413,10 @@ export const useDesignStore = create<DesignState>((set, get) => ({
   },
 
   startPattern: () => {
-    const { items, selectedIds, patternDirection, patternRepeatCount } = get()
+    const { items, selectedIds, patternDirection, patternRepeatCount, patternGapMm } = get()
     if (selectedIds.length === 0) return
     const src = items.filter(i => selectedIds.includes(i.id))
-    const preview = computePatternItems(src, patternDirection, patternRepeatCount, DEFAULT_GROUT_GAP_MM)
+    const preview = computePatternItems(src, patternDirection, patternRepeatCount, patternGapMm)
     set({
       activeTool: 'pattern', previewItems: preview,
     })
@@ -416,10 +430,12 @@ export const useDesignStore = create<DesignState>((set, get) => ({
   },
 
   setMirrorOriginMm: (x, y) => {
-    const { items, selectedIds, mirrorAxis } = get()
+    const { items, selectedIds, mirrorAxis, snapEnabled } = get()
+    const ox = snapEnabled ? snapMm(x) : x
+    const oy = snapEnabled ? snapMm(y) : y
     const src = items.filter(i => selectedIds.includes(i.id))
-    const preview = computeMirrorItems(src, mirrorAxis, x, y)
-    set({ mirrorOriginMm: { x, y }, previewItems: preview })
+    const preview = computeMirrorItems(src, mirrorAxis, ox, oy)
+    set({ mirrorOriginMm: { x: ox, y: oy }, previewItems: preview })
   },
 
   setRadialCount: (count) => {
@@ -431,32 +447,45 @@ export const useDesignStore = create<DesignState>((set, get) => ({
   },
 
   setRadialCenterMm: (x, y) => {
-    const { items, selectedIds, radialCount } = get()
+    const { items, selectedIds, radialCount, snapEnabled } = get()
+    const cx = snapEnabled ? snapMm(x) : x
+    const cy = snapEnabled ? snapMm(y) : y
     const src = items.filter(i => selectedIds.includes(i.id))
-    const preview = computeRadialItems(src, radialCount, x, y)
-    set({ radialCenterMm: { x, y }, previewItems: preview })
+    const preview = computeRadialItems(src, radialCount, cx, cy)
+    set({ radialCenterMm: { x: cx, y: cy }, previewItems: preview })
   },
 
   setPatternDirection: (dir) => {
-    const { items, selectedIds, patternRepeatCount } = get()
+    const { items, selectedIds, patternRepeatCount, patternGapMm } = get()
     const src = items.filter(i => selectedIds.includes(i.id))
-    const preview = computePatternItems(src, dir, patternRepeatCount, DEFAULT_GROUT_GAP_MM)
+    const preview = computePatternItems(src, dir, patternRepeatCount, patternGapMm)
     set({ patternDirection: dir, previewItems: preview })
   },
 
   setPatternRepeatCount: (n) => {
     const clamped = Math.max(1, Math.min(50, n))
-    const { items, selectedIds, patternDirection } = get()
+    const { items, selectedIds, patternDirection, patternGapMm } = get()
     const src = items.filter(i => selectedIds.includes(i.id))
-    const preview = computePatternItems(src, patternDirection, clamped, DEFAULT_GROUT_GAP_MM)
+    const preview = computePatternItems(src, patternDirection, clamped, patternGapMm)
     set({ patternRepeatCount: clamped, previewItems: preview })
   },
 
-  moveDuplicateOffset: (x, y) => {
-    const { items, selectedIds } = get()
+  setPatternGapMm: (n) => {
+    // 重複防止のための下限クランプは廃止（オーバーラップも自由に作れるようにする）
+    const clamped = Math.max(-30, Math.min(30, n))
+    const { items, selectedIds, patternDirection, patternRepeatCount } = get()
     const src = items.filter(i => selectedIds.includes(i.id))
-    const preview = computeDuplicateItems(src, x, y)
-    set({ duplicateOffsetMm: { x, y }, previewItems: preview })
+    const preview = computePatternItems(src, patternDirection, patternRepeatCount, clamped)
+    set({ patternGapMm: clamped, previewItems: preview })
+  },
+
+  moveDuplicateOffset: (x, y) => {
+    const { items, selectedIds, snapEnabled } = get()
+    const ox = snapEnabled ? snapMm(x) : x
+    const oy = snapEnabled ? snapMm(y) : y
+    const src = items.filter(i => selectedIds.includes(i.id))
+    const preview = computeDuplicateItems(src, ox, oy)
+    set({ duplicateOffsetMm: { x: ox, y: oy }, previewItems: preview })
   },
 
   confirmPlacement: () => {

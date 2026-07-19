@@ -32,11 +32,11 @@ function buildExportSvgString(
         `<stop offset="70%" stop-color="#f0f8ff" stop-opacity="0.90"/>` +
         `<stop offset="100%" stop-color="#a8c8e8" stop-opacity="0.75"/>` +
         `</linearGradient></defs>` +
-        `<polygon points="${points}" fill="url(#${gradId})" fill-opacity="${fillOpacity}" stroke="#00000030" stroke-width="0.2"/>` +
+        `<polygon points="${points}" fill="url(#${gradId})" fill-opacity="${fillOpacity}"/>` +
         `</g>`
     }
     return `<g transform="translate(${x},${y})">` +
-      `<polygon points="${points}" fill="${color.fill}" fill-opacity="${fillOpacity}" stroke="#00000030" stroke-width="0.2"/>` +
+      `<polygon points="${points}" fill="${color.fill}" fill-opacity="${fillOpacity}"/>` +
       `</g>`
   }).join('')
 

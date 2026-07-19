@@ -26,6 +26,7 @@ export function PlacementToolbar() {
     radialCount, setRadialCount,
     patternDirection, setPatternDirection,
     patternRepeatCount, setPatternRepeatCount,
+    patternGapMm, setPatternGapMm,
     confirmPlacement, cancelPlacement,
   } = useDesignStore()
 
@@ -89,9 +90,9 @@ export function PlacementToolbar() {
           </div>
         )}
 
-        {/* 連続配置: 方向パッド + 繰り返し数 */}
+        {/* 連続配置: 方向パッド + 繰り返し数 + マージン */}
         {activeTool === 'pattern' && (
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-4">
             {/* 方向パッド */}
             <div className="grid grid-cols-3 gap-1">
               {DIR_GRID.map((row, ri) =>
@@ -126,6 +127,21 @@ export function PlacementToolbar() {
                 <span className="w-6 text-white text-center font-bold">{patternRepeatCount}</span>
                 <button
                   onClick={() => setPatternRepeatCount(patternRepeatCount + 1)}
+                  className="w-9 h-9 rounded-lg bg-gray-800 text-white text-xl font-bold border border-gray-600 active:bg-gray-700"
+                >＋</button>
+              </div>
+            </div>
+            {/* マージン（目地幅） */}
+            <div className="flex flex-col items-center gap-1">
+              <span className="text-gray-400 text-xs">マージン(mm)</span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setPatternGapMm(patternGapMm - 1)}
+                  className="w-9 h-9 rounded-lg bg-gray-800 text-white text-xl font-bold border border-gray-600 active:bg-gray-700"
+                >−</button>
+                <span className="w-6 text-white text-center font-bold">{patternGapMm}</span>
+                <button
+                  onClick={() => setPatternGapMm(patternGapMm + 1)}
                   className="w-9 h-9 rounded-lg bg-gray-800 text-white text-xl font-bold border border-gray-600 active:bg-gray-700"
                 >＋</button>
               </div>

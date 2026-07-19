@@ -83,6 +83,18 @@ export function computeRadialItems(
 
 // ── パターン連続配置 ──────────────────────────────────────────────────────────
 
+/** 連続配置の各方向の単位ベクトル（キャンバス外接矩形へのドラッグ投影に使用） */
+export const PATTERN_DIRECTION_UNIT: Record<PatternDirection, { x: number; y: number }> = {
+  up:    { x: 0,  y: -1 },
+  down:  { x: 0,  y: 1 },
+  left:  { x: -1, y: 0 },
+  right: { x: 1,  y: 0 },
+  ul:    { x: -Math.SQRT1_2, y: -Math.SQRT1_2 },
+  ur:    { x: Math.SQRT1_2,  y: -Math.SQRT1_2 },
+  ll:    { x: -Math.SQRT1_2, y: Math.SQRT1_2 },
+  lr:    { x: Math.SQRT1_2,  y: Math.SQRT1_2 },
+}
+
 export function computePatternItems(
   sourceItems: GlassItem[],
   direction: PatternDirection,

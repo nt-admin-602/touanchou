@@ -12,6 +12,7 @@ export function BottomPalette() {
     setPendingShape, setPendingColor,
     changeSelectedColor, changeSelectedShape,
     selectMode, setSelectMode,
+    snapEnabled, setSnapEnabled,
     deleteSelected, startDuplicate, startMirror, startPattern, startRadial,
   } = useDesignStore()
 
@@ -62,6 +63,20 @@ export function BottomPalette() {
           ].join(' ')}
         >
           ☝
+        </button>
+
+        {/* 1mmグリッド吸着トグル */}
+        <button
+          onClick={() => setSnapEnabled(!snapEnabled)}
+          title={snapEnabled ? '1mm吸着オフに切替' : '1mm吸着オンに切替'}
+          className={[
+            'shrink-0 px-3 py-2 rounded-lg border transition-colors text-xl',
+            snapEnabled
+              ? 'bg-blue-500 border-blue-400 text-white'
+              : 'bg-gray-700 border-gray-600 text-gray-200 active:bg-gray-600',
+          ].join(' ')}
+        >
+          🧲
         </button>
 
         <div className="w-px self-stretch bg-gray-700 shrink-0" />
