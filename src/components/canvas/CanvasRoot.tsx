@@ -196,8 +196,12 @@ export function CanvasRoot() {
           dragState.current.dupStartOffsetX = duplicateOffsetMm.x
           dragState.current.dupStartOffsetY = duplicateOffsetMm.y
           dragState.current.pendingGlassId = 'duplicate'
-        } else {
+        } else if (activeTool === 'none') {
           dragState.current.pendingGlassId = hitTest(e.clientX, e.clientY)
+        } else {
+          // 鏡像/放射対称/連続配置の仮配置中は、専用ハンドル以外で
+          // 既存ガラスに触れられないようにする
+          dragState.current.pendingGlassId = null
         }
       }
     }
@@ -262,12 +266,19 @@ export function CanvasRoot() {
     // 複製ドラッグモード
     if (activeTool === 'duplicate') {
       if (Math.hypot(dx, dy) > 2) {
+        if (!ds.isDragging) {
+          ds.isDragging = true
+          ds.lastSnapStepIndex = null
+        }
         const startMm = screenToMm(info.startX, info.startY, viewport)
         const currMm  = screenToMm(e.clientX, e.clientY, viewport)
+        const offsetDx = currMm.x - startMm.x
+        const offsetDy = currMm.y - startMm.y
         moveDuplicateOffset(
-          ds.dupStartOffsetX + (currMm.x - startMm.x),
-          ds.dupStartOffsetY + (currMm.y - startMm.y),
+          ds.dupStartOffsetX + offsetDx,
+          ds.dupStartOffsetY + offsetDy,
         )
+        if (snapEnabled) tickSnapSound(Math.hypot(offsetDx, offsetDy), 1)
       }
       return
     }
@@ -279,7 +290,9 @@ export function CanvasRoot() {
         ds.isDragging = true
         ds.lastSnapStepIndex = null
         const isRotating = ds.mode === 'rotate-glass' || ds.mode === 'rotate-group'
-        if (!isRotating) {
+        // 鏡像/放射対称/連続配置の仮配置中（duplicateは専用分岐で既に return 済み）は、
+        // 専用ハンドル以外の一般ドラッグで既存ガラスを選択・移動できないようにする
+        if (!isRotating && activeTool === 'none') {
           const hitId = ds.pendingGlassId ?? hitTest(info.startX, info.startY)
           if (hitId) {
             ds.preDragItems = [...items]
