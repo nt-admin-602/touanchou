@@ -11,9 +11,11 @@ import {
   getItemWorldVertices, polygonsOverlap,
 } from '../../utils/geometry'
 import { PATTERN_DIRECTION_UNIT } from '../../utils/placement'
+import { playTapSound, playStepSound } from '../../utils/sound'
 import type { GlassItem } from '../../types'
 
 const DRAG_THRESHOLD_PX = 6
+const ROTATION_SNAP_DEG = 5 // coordinates.ts の snapDeg と同じ刻み（吸着音のタイミング用）
 
 type PointerInfo = { x: number; y: number; startX: number; startY: number }
 type DragMode =
@@ -112,6 +114,8 @@ export function CanvasRoot() {
     patternGapDragStartX: number
     patternGapDragStartY: number
     patternGapDragStartGap: number
+    // スナップ吸着音: 直近に鳴らした「何段階目か」（ドラッグ開始でリセット）
+    lastSnapStepIndex: number | null
   }>({
     mode: 'idle', glassId: '', startGlassX: 0, startGlassY: 0,
     startAngleDeg: 0, startRotationDeg: 0,
@@ -139,7 +143,17 @@ export function CanvasRoot() {
     patternGapDragStartX: 0,
     patternGapDragStartY: 0,
     patternGapDragStartGap: 0,
+    lastSnapStepIndex: null,
   })
+
+  /** value を step 単位で丸めた「何段階目か」が前回と変わっていたら吸着音を鳴らす */
+  const tickSnapSound = useCallback((value: number, step: number) => {
+    const idx = Math.round(value / step)
+    if (dragState.current.lastSnapStepIndex !== idx) {
+      dragState.current.lastSnapStepIndex = idx
+      playStepSound()
+    }
+  }, [])
 
   /** スクリーン座標でヒットテスト（選択中を最前面で判定） */
   const hitTest = useCallback((sx: number, sy: number): string | null => {
@@ -263,6 +277,7 @@ export function CanvasRoot() {
       const threshold = ds.pendingGlassId ? 2 : DRAG_THRESHOLD_PX
       if (Math.hypot(dx, dy) > threshold) {
         ds.isDragging = true
+        ds.lastSnapStepIndex = null
         const isRotating = ds.mode === 'rotate-glass' || ds.mode === 'rotate-group'
         if (!isRotating) {
           const hitId = ds.pendingGlassId ?? hitTest(info.startX, info.startY)
@@ -310,6 +325,7 @@ export function CanvasRoot() {
         const newX = ds.startGlassX + (currMm.x - startMm.x)
         const newY = ds.startGlassY + (currMm.y - startMm.y)
         moveGlass(ds.glassId, newX, newY)
+        if (snapEnabled) tickSnapSound(Math.hypot(newX - ds.startGlassX, newY - ds.startGlassY), 1)
       }
       if (ds.mode === 'drag-group') {
         const startMm = screenToMm(info.startX, info.startY, viewport)
@@ -325,6 +341,7 @@ export function CanvasRoot() {
           yMm: pos.yMm + dyMm,
         }))
         batchMoveGlasses(updates)
+        if (snapEnabled) tickSnapSound(Math.hypot(dxMm, dyMm), 1)
       }
       if (ds.mode === 'rotate-glass' && ds.glassId) {
         const item = items.find(i => i.id === ds.glassId)
@@ -339,6 +356,7 @@ export function CanvasRoot() {
         ) * (180 / Math.PI)
         const newRot = ds.startRotationDeg + (angle - ds.startAngleDeg)
         rotateGlass(ds.glassId, newRot)
+        tickSnapSound(angle - ds.startAngleDeg, ROTATION_SNAP_DEG)
       }
       if (ds.mode === 'rotate-group') {
         const centerScreen = {
@@ -367,12 +385,14 @@ export function CanvasRoot() {
           }
         })
         batchRotateGroup(updates)
+        tickSnapSound(angle - ds.startAngleDeg, ROTATION_SNAP_DEG)
       }
       if (ds.mode === 'drag-radial-center' || ds.mode === 'drag-mirror-origin') {
         const startMm = screenToMm(ds.centerDragStartX, ds.centerDragStartY, viewport)
         const currMm = screenToMm(e.clientX, e.clientY, viewport)
         const newX = ds.centerDragStartOx + (currMm.x - startMm.x)
         const newY = ds.centerDragStartOy + (currMm.y - startMm.y)
+        if (snapEnabled) tickSnapSound(Math.hypot(currMm.x - startMm.x, currMm.y - startMm.y), 1)
         if (ds.mode === 'drag-radial-center') {
           setRadialCenterMm(newX, newY)
         } else {
@@ -387,9 +407,10 @@ export function CanvasRoot() {
         const delta = (currMm.x - startMm.x) * unit.x + (currMm.y - startMm.y) * unit.y
         const newGap = ds.patternGapDragStartGap + delta
         setPatternGapMm(snapEnabled ? Math.round(newGap) : newGap)
+        if (snapEnabled) tickSnapSound(delta, 1)
       }
     }
-  }, [viewport, setViewport, hitTest, items, selectedIds, selectGlass, moveGlass, batchMoveGlasses, rotateGlass, batchRotateGroup, activeTool, moveDuplicateOffset, selectMode, setRadialCenterMm, setMirrorOriginMm, patternDirection, setPatternGapMm, snapEnabled])
+  }, [viewport, setViewport, hitTest, items, selectedIds, selectGlass, moveGlass, batchMoveGlasses, rotateGlass, batchRotateGroup, activeTool, moveDuplicateOffset, selectMode, setRadialCenterMm, setMirrorOriginMm, patternDirection, setPatternGapMm, snapEnabled, tickSnapSound])
 
   const onPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     const info = pointers.current.get(e.pointerId)
@@ -424,6 +445,7 @@ export function CanvasRoot() {
       // タップ判定
       const hitId = hitTest(info.startX, info.startY)
       if (hitId) {
+        playTapSound()
         if (selectMode) {
           toggleSelectGlass(hitId)
         } else {
@@ -448,11 +470,14 @@ export function CanvasRoot() {
               polygonsOverlap(tempVerts, getItemWorldVertices(item))
             )
             if (overlapItem) {
+              playTapSound()
               selectGlass(overlapItem.id)
             } else {
+              playTapSound()
               placeGlass(mm.x, mm.y)
             }
           } else {
+            playTapSound()
             placeGlass(mm.x, mm.y)
           }
         }
@@ -500,6 +525,7 @@ export function CanvasRoot() {
     dragState.current.preDragItems = [...items]
     dragState.current.startAngleDeg = startAngle
     dragState.current.isDragging = true
+    dragState.current.lastSnapStepIndex = null
 
     if (selectedIds.length === 1) {
       const item = items.find(i => i.id === selectedIds[0])
@@ -547,6 +573,7 @@ export function CanvasRoot() {
     e.stopPropagation()
     dragState.current.mode = mode
     dragState.current.isDragging = true
+    dragState.current.lastSnapStepIndex = null
     dragState.current.centerDragStartX = e.clientX
     dragState.current.centerDragStartY = e.clientY
     dragState.current.centerDragStartOx = originXMm
@@ -564,6 +591,7 @@ export function CanvasRoot() {
     e.stopPropagation()
     dragState.current.mode = 'drag-pattern-gap'
     dragState.current.isDragging = true
+    dragState.current.lastSnapStepIndex = null
     dragState.current.patternGapDragStartX = e.clientX
     dragState.current.patternGapDragStartY = e.clientY
     dragState.current.patternGapDragStartGap = patternGapMm

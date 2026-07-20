@@ -78,11 +78,13 @@ export function PlacementToolbar() {
             <span className="text-gray-400 text-xs">展開数</span>
             <div className="flex items-center gap-2">
               <button
+                data-sound="step"
                 onClick={() => setRadialCount(radialCount - 1)}
                 className="w-9 h-9 rounded-lg bg-gray-800 text-white text-xl font-bold border border-gray-600 active:bg-gray-700"
               >−</button>
               <span className="w-8 text-white text-center font-bold">{radialCount}</span>
               <button
+                data-sound="step"
                 onClick={() => setRadialCount(radialCount + 1)}
                 className="w-9 h-9 rounded-lg bg-gray-800 text-white text-xl font-bold border border-gray-600 active:bg-gray-700"
               >＋</button>
@@ -121,11 +123,13 @@ export function PlacementToolbar() {
               <span className="text-gray-400 text-xs">繰り返し</span>
               <div className="flex items-center gap-2">
                 <button
+                  data-sound="step"
                   onClick={() => setPatternRepeatCount(patternRepeatCount - 1)}
                   className="w-9 h-9 rounded-lg bg-gray-800 text-white text-xl font-bold border border-gray-600 active:bg-gray-700"
                 >−</button>
                 <span className="w-6 text-white text-center font-bold">{patternRepeatCount}</span>
                 <button
+                  data-sound="step"
                   onClick={() => setPatternRepeatCount(patternRepeatCount + 1)}
                   className="w-9 h-9 rounded-lg bg-gray-800 text-white text-xl font-bold border border-gray-600 active:bg-gray-700"
                 >＋</button>
@@ -136,11 +140,13 @@ export function PlacementToolbar() {
               <span className="text-gray-400 text-xs">マージン(mm)</span>
               <div className="flex items-center gap-2">
                 <button
+                  data-sound="step"
                   onClick={() => setPatternGapMm(patternGapMm - 1)}
                   className="w-9 h-9 rounded-lg bg-gray-800 text-white text-xl font-bold border border-gray-600 active:bg-gray-700"
                 >−</button>
                 <span className="w-6 text-white text-center font-bold">{patternGapMm}</span>
                 <button
+                  data-sound="step"
                   onClick={() => setPatternGapMm(patternGapMm + 1)}
                   className="w-9 h-9 rounded-lg bg-gray-800 text-white text-xl font-bold border border-gray-600 active:bg-gray-700"
                 >＋</button>
